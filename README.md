@@ -236,9 +236,15 @@ it at anything you care about.
 | Version | Focus |
 |---|---|
 | **v0.1 — early alpha** (now) | The full loop: blueprint → parallel smiths → Odin's gates & review → green `main`; treasury, phone app, push, sandbox |
-| **v0.2** | ✓ Odin and the vault in the world ([design](docs/ODIN.md)); tap-a-dwarf cards; per-command animations (slate with the running command, to-do chalkboards); the quest board |
-| **v0.3** | Pick projects from the UI; GitHub PR mode (push, CI, merge via `gh`); native Linux/macOS scripts |
-| **v1.0** | Stable: mileage on real projects, docs, crew lore |
+| **v0.2** — Clear sight | ✓ Odin and the vault in the world; tap-a-dwarf cards, live transcripts, command slates, history |
+| **v0.3** — Talk to the forge | Conversational planning, repo Q&A, whispering to smiths, project instructions & skills |
+| **v0.4** — Real repos | Project picker, settings, GitHub PR mode, quest board backlog, opt-in MCP |
+| **v0.5** — Other realms | OpenAI (Codex) and Gemini agents alongside Claude, assignable per role |
+| **v0.6** — The living hall | Crew lore, idle life, day/night, a hall that grows, chronicle & titles, music |
+| **v0.7** — Anyone can forge | `npx deepanvil` + setup wizard, native macOS/Linux, device pairing |
+| **v1.0** | Public launch: real-repo mileage, security audit, docs site, demo |
+
+The full plan and gap analysis: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 Ideas and bug reports are welcome as issues. The design lives in [DESIGN.md](DESIGN.md) and
 [docs/ODIN.md](docs/ODIN.md).

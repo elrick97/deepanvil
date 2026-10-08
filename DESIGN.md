@@ -147,4 +147,4 @@ Plan usage % · 5-hour window countdown · burn rate · today's API-equivalent c
 - **Painterly on iPhone:** budget the shaders early in M1 on the actual device.
 - **iOS PWA:** push only works when the app is installed to the home screen; audio needs a user tap to unlock.
 - **PC must be awake** for remote use (power settings / wake-on-LAN later).
-- Open: crew names & personalities, music source (CC0 vs generated), whether the quest board syncs with GitHub Issues.
+- Open items moved to [docs/ROADMAP.md](docs/ROADMAP.md) (2026-10-08): crew lore is proposed in [docs/LORE.md](docs/LORE.md); the quest board ↔ GitHub Issues sync is v2; the music source is decided in v0.6.
