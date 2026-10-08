@@ -2,6 +2,17 @@
 
 **A cozy, painterly dwarven forge where your AI coding agents live and work.**
 
+[![CI](https://github.com/elrick97/deepanvil/actions/workflows/ci.yml/badge.svg)](https://github.com/elrick97/deepanvil/actions/workflows/ci.yml)
+![Status: early alpha](https://img.shields.io/badge/status-early%20alpha-orange)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue)
+
+> [!WARNING]
+> **Early alpha — a personal project, shared as it grows.** It works end to end on one setup
+> (Windows 11 + WSL2 Ubuntu + a Claude subscription) and has mostly been exercised on a practice
+> repository. Expect rough edges, breaking changes and setup friction. It runs autonomous agents
+> that execute code on your machine: read the [security model](#security-model) first, and start
+> with the built-in practice sandbox, not a project you care about.
+
 Deepanvil is a coding-agent harness you can *watch*. Ask the Forgemaster for a feature and a
 crew of dwarves gets to work in a sunlit cavern: Opus drafts the blueprint, Sonnet smiths
 hammer out the code in their own git worktrees, and a little Haiku sprite carries notes
@@ -105,47 +116,65 @@ tested commit. Design: [docs/ODIN.md](docs/ODIN.md).
 | `scripts` | Asset pipeline, WSL service, sandbox/engine setup |
 | `DESIGN.md` | The design spec and decisions |
 
-## Getting started
+## Try the world without agents
 
-Developed on **Windows 11 + WSL2 (Ubuntu)**; the server and agents run in WSL, the asset
-pipeline and dev server on Windows. Linux/macOS should work with small script changes.
-
-**Prerequisites:** Node 24 (Windows and inside WSL), git, a Claude subscription or API access
-(log in once with `claude` inside WSL), Blender 5.2 (only to rebuild assets), and optionally
-[Tailscale](https://tailscale.com) for phone access.
+No Claude account, WSL or Blender needed — the quest simulator drives the world (Node 24+, any OS):
 
 ```bash
-npm install                      # on Windows
-npm run build                    # production client
+npm install
+npm run build
+MOCK=1 node apps/server/src/index.ts     # then open http://localhost:8787
 ```
 
-Inside WSL:
+(PowerShell: `$env:MOCK=1; node apps/server/src/index.ts`)
+
+## Getting started (real agents)
+
+**Tested setup:** Windows 11 + WSL2 (Ubuntu), Node 24 on both sides, a Claude subscription
+logged in *inside WSL* (`claude` once), git. Optional: Blender 5.2 (to rebuild the 3D assets —
+the built ones are committed) and [Tailscale](https://tailscale.com) for phone access.
+Native Linux/macOS should mostly work but the helper scripts assume WSL today.
+
+On Windows:
 
 ```bash
-bash scripts/setup-engine.sh     # the Agent SDK's Linux engine, pinned to the SDK version
-bash scripts/setup-sandbox.sh    # a tiny practice repo for the first quests
-sudo apt install bubblewrap socat   # recommended: OS sandbox for the smiths
+npm install
+npm run build
 ```
 
-Then start the always-on forge and open <http://localhost:8787>:
+Inside WSL (Ubuntu):
 
 ```bash
-npm run forge:install            # run the forge at Windows logon
-npm run forge:start
+bash scripts/setup-engine.sh        # the Agent SDK's Linux engine, pinned to the SDK version
+bash scripts/setup-sandbox.sh       # a tiny practice repo for the first quests
+sudo apt install bubblewrap socat   # the OS sandbox for the smiths (strongly recommended)
 ```
+
+Back on Windows, check everything and start the always-on forge:
+
+```bash
+npm run doctor                      # tells you exactly what's missing and how to fix it
+npm run forge:install               # run the forge at Windows logon
+npm run forge:start                 # then open http://localhost:8787
+```
+
+Ask Thráin for something small ("Add a clear() method to Inventory, with tests"), approve his
+blueprint, and watch.
 
 | Command | |
 |---|---|
+| `npm run doctor` | Check prerequisites; explains every fix |
 | `npm run dev` | Client dev server on :5173 (proxies to the forge) |
 | `npm run forge:restart` / `forge:log` | Restart the forge after server changes / tail its log |
 | `npm run assets` · `assets:crew` · `assets:coin` | Rebuild the hall, crew or coin in headless Blender |
 | `npm run typecheck` | TypeScript across all packages |
-| `bash scripts/server.sh selftest` (WSL) | Zero-token orchestration + permission self-test |
+| `bash scripts/server.sh selftest` (WSL) | Zero-token orchestration + permission self-test (also runs in CI) |
 | `MOCK=1` | Run the quest simulator instead of real agents |
 
 Configuration (environment of the forge): `DEEPANVIL_REPO` (repo the crew works on, default
 `~/deepanvil/forge/sandbox`), `DEEPANVIL_SMITHS` (parallel smiths, default 2),
-`DEEPANVIL_SANDBOX=0` (disable the OS sandbox), `DEEPANVIL_PUSH_SUBJECT`.
+`DEEPANVIL_WSL_DISTRO` (default `Ubuntu`), `DEEPANVIL_SANDBOX=0` (disable the OS sandbox),
+`DEEPANVIL_PUSH_SUBJECT`, `BLENDER` (path to Blender).
 
 ### On your phone
 
@@ -157,6 +186,10 @@ tailscale serve --bg http://localhost:8787
 
 Open `https://<your-pc>.<your-tailnet>.ts.net`, then **Share → Add to Home Screen** and tap
 **🔔 alerts** to get the bell on your phone.
+
+If the phone times out ("server didn't respond") while `tailscale ping` works, your tailnet
+policy doesn't let your devices reach the PC. With a custom policy, add a grant like
+`{ "src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["tcp:443"] }`.
 
 ## Security model
 
@@ -186,13 +219,30 @@ it at anything you care about.
   `~/.deepanvil`; the agents use your existing Claude login. Nothing in this repository is
   machine- or account-specific.
 
-## Status
+## Known limitations
 
-Built: the world (hall, crew, living events, sound), real agents with approval, bell and stop,
-the gold treasury, persistence, always-on service and PWA with push.
+- **One user, no login** — the forge trusts whoever can reach it (localhost / your tailnet).
+- **One repository at a time**, chosen with `DEEPANVIL_REPO`; no project picker yet.
+- **Windows + WSL helper scripts**; the server itself is plain Node and should run on Linux/macOS.
+- **Mostly exercised on the practice sandbox.** Real projects need working test/typecheck/lint
+  commands for Odin's gates (auto-detected from `package.json`, `pyproject.toml` or a `Makefile`);
+  without a test command Odin can only review, and says so.
+- **Subscription limits are real**: a small quest costs roughly 20 gold coins (≈ $0.20 at API
+  list prices); several parallel smiths can hit your 5-hour window.
+- Odin and the Vault of Main exist as designs and concept models but aren't in the 3D world yet.
+- The crew's names and looks are placeholders.
 
-Next: lore & polish (titles earned by the crew, a daily forge chronicle), an in-world quest
-board, choosing projects from the UI.
+## Roadmap
+
+| Version | Focus |
+|---|---|
+| **v0.1 — early alpha** (now) | The full loop: blueprint → parallel smiths → Odin's gates & review → green `main`; treasury, phone app, push, sandbox |
+| **v0.2** | Odin and the vault in the world ([design](docs/ODIN.md)); tap-a-dwarf cards; per-command animations (slate with the running command, to-do chalkboards); the quest board |
+| **v0.3** | Pick projects from the UI; GitHub PR mode (push, CI, merge via `gh`); native Linux/macOS scripts |
+| **v1.0** | Stable: mileage on real projects, docs, crew lore |
+
+Ideas and bug reports are welcome as issues. The design lives in [DESIGN.md](DESIGN.md) and
+[docs/ODIN.md](docs/ODIN.md).
 
 ## License
 

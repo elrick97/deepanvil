@@ -135,7 +135,8 @@ export class Odin {
     this.state(o, 'rebasing');
     await this.scratchAt(o.branch);
     try {
-      await git(this.scratch, 'rebase', '-q', 'main');
+      // Odin is the committer of rebased commits (authors are kept); works without a git identity.
+      await git(this.scratch, '-c', 'user.name=Odin (Deepanvil)', '-c', 'user.email=odin@deepanvil.local', 'rebase', '-q', 'main');
     } catch {
       await git(this.scratch, 'rebase', '--abort').catch(() => undefined);
       return this.sendBack(
