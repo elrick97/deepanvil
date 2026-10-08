@@ -6,9 +6,11 @@
 
 ![Odin and the Vault of Main (concept)](concepts/odin-hero.png)
 
-Status: **O1 + O2 built** (2026-10-08): the queue, gates, policy, Sonnet review, send-back loop,
-vault health, offering cards with diff viewer and push — covered by the zero-token self-test.
-**O3 (Odin and the vault in the world) and O4 (GitHub PRs) are next.** Replaces roadmap P0
+Status: **O1–O3 built** (2026-10-08): the queue, gates, policy, Sonnet review, send-back loop,
+vault health, offering cards with diff viewer and push — covered by the zero-token self-test —
+and the vault in the hall: rigged Odin (`assets/src/forge/odin_rig.py` → `odin.glb`), rune
+gates, scales, the merge door, Huginn's notes and Muninn's lap (`apps/client/src/world/vault.ts`);
+the mock simulator plays the whole flow. **O4 (GitHub PRs) is next.** Replaces roadmap P0
 items 1–2 and removes Thráin's review step.
 
 ---

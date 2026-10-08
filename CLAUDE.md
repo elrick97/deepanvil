@@ -7,12 +7,13 @@ A painterly 3D dwarven forge-hall that visualizes and drives AI coding agents. F
 - `apps/server` — forge server (`node:http` + `ws`). Runs in **WSL2 Ubuntu** on Node 24, executing `.ts` directly via type stripping — keep server code erasable-syntax only (no enums, namespaces, or parameter properties) and its deps pure JS, since `node_modules` is shared with Windows.
 - `packages/shared` — the event contract (`events.ts`) both sides speak. The mock simulator and the real orchestrator must emit identical events.
 - `tools/blender` — launcher scripts for blender-mcp (the add-on itself is installed with `uvx mcp-for-blender==2.1.9 install-addon`, never vendored).
-- `assets/src` — procedural Blender Python that builds the hall. Layout lives in `forge/layout.py` (authored in three.js coords via `P()`); the client places lights, crew and effects from exported `anchor_*` empties, so move things there, not in client code. Parts the client animates (bell, bellows, minecart, ingots) are built with `keep=True` and stay separate nodes.
+- `assets/src` — procedural Blender Python that builds the hall. Layout lives in `forge/layout.py` (authored in three.js coords via `P()`); the client places lights, crew and effects from exported `anchor_*` empties, so move things there, not in client code. Parts the client animates (bell, bellows, minecart, ingots) are built with `keep=True` and stay separate nodes; parts sharing a `join=` key merge into one node per material after painting (the vault door, scales beam/pans).
 
 ## Commands
 - `npm run server` — the **live** forge in WSL on :8787 (idles until you ask Thráin for a quest in the UI). Env: `DEEPANVIL_REPO` (default `~/deepanvil/forge/sandbox`), `DEEPANVIL_SMITHS` (default 2). `MOCK=1` runs the quest simulator instead (`apps/server/src/mock.ts`): blueprint → approval → tasks with reads/edits/tests/retries/escalation/bell → merge. New clients get the current quest's state events replayed after `hello`.
 - `npm run dev` — client on http://127.0.0.1:5173 (proxies `/ws` and `/health` to the server).
 - `npm run typecheck` — TypeScript 7 across all packages.
+- `npm run assets:crew` / `assets:odin` / `assets:coin` — the dwarf kit, rigged Odin (+ raven), the coin.
 - `npm run assets` — headless Blender builds + paints (raycast AO into vertex colours) + exports `apps/client/public/assets/hall.glb`, then meshopt-compresses it (~5 s). Pass extra args after `--`, e.g. `-- --rays 48 --save` (also writes `assets/out/hall.blend`).
 - `npm run assets:coin` — the gold coin (`build_coin.py`): `coin.glb` for flying coins + a rendered `coin.png` HUD icon.
 - `scripts\blender.cmd` — opens Blender with the MCP socket on localhost:9876 (the `blender` MCP server in `.mcp.json` talks to it).
@@ -49,4 +50,5 @@ PWA: manifest + `public/sw.js` (push, Allow/Deny actions → `POST /api/answer`)
 - Headless Cycles vertex-colour baking returned garbage in Blender 5.2 — AO is computed with BVH raycasts in `forge/paint.py` instead.
 - three r183+: use `THREE.RenderPipeline` (not `PostProcessing`). `MeshToonMaterial` has no `flatShading` — use `facet()` from `world/toon.ts`.
 - Don't set `rotation.x/z` on objects oriented with `lookAt` (Euler can be ±π) — animate an inner group instead.
-- In dev, `window.scene/camera/crew/fx/THREE` are exposed for debugging.
+- meshopt quantization stores a scale/offset on each node: animate kept parts relative to their rest transform.
+- In dev, `window.scene/camera/crew/fx/hall/vault/THREE` and `forgeDispatch(event)` are exposed for debugging.

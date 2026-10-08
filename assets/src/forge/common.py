@@ -170,8 +170,10 @@ def link(ob):
     return ob
 
 
-def make(name, bm, color, mat='paint', matrix=None, keep=False, ao=True):
-    """Create a mesh object from a BMesh. color = '#hex' base paint color."""
+def make(name, bm, color, mat='paint', matrix=None, keep=False, ao=True, join=None):
+    """Create a mesh object from a BMesh. color = '#hex' base paint color.
+    Kept parts sharing a `join` key are merged after painting into one node per material
+    (named after the key), pivoting where the key's first part does."""
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
@@ -181,6 +183,8 @@ def make(name, bm, color, mat='paint', matrix=None, keep=False, ao=True):
         ob.matrix_world = matrix
     ob['base'] = color
     ob['ao'] = ao
+    if join:
+        ob['join'] = join
     (NAMED if keep else STATIC).append(ob)
     return ob
 
@@ -191,14 +195,15 @@ class Prop:
     def __init__(self, name, at, yaw=0.0, scale_=1.0, keep=False):
         self.name = name
         self.keep = keep
+        self.yaw = yaw
         self.m = Matrix.Translation(at) @ Matrix.Rotation(yaw, 4, 'Z') @ Matrix.Diagonal((scale_, scale_, scale_, 1))
         self.n = 0
 
-    def part(self, bm, color, mat='paint', at=(0, 0, 0), rx=0.0, ry=0.0, rz=0.0, name=None, keep=None, ao=True):
+    def part(self, bm, color, mat='paint', at=(0, 0, 0), rx=0.0, ry=0.0, rz=0.0, name=None, keep=None, ao=True, join=None):
         self.n += 1
         local = Matrix.Translation(at) @ (Matrix.Rotation(rz, 4, 'Z') @ Matrix.Rotation(ry, 4, 'Y') @ Matrix.Rotation(rx, 4, 'X'))
         return make(name or f'{self.name}_{self.n}', bm, color, mat, self.m @ local,
-                    keep=self.keep if keep is None else keep, ao=ao)
+                    keep=(self.keep if keep is None else keep) or bool(join), ao=ao, join=join)
 
     def world(self, x, y, z) -> Vector:
         return self.m @ Vector((x, y, z))

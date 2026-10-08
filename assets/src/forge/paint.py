@@ -139,3 +139,36 @@ def join_by_material(objs, prefix='hall'):
         group[0].name = f'{prefix}_{mat}'
         joined.append(group[0])
     return joined
+
+
+def join_keep(objs):
+    """Merge kept parts that share a 'join' key: one node per (key, material), all pivoting
+    at the key's first part. Returns the surviving list of kept objects."""
+    groups: dict = {}
+    out = []
+    for ob in objs:
+        if 'join' in ob:
+            groups.setdefault(ob['join'], []).append(ob)
+        else:
+            out.append(ob)
+    for key, members in groups.items():
+        pivot = members[0].matrix_world.copy()
+        inv = pivot.inverted()
+        by_mat: dict = {}
+        for ob in members:
+            ob.data.transform(inv @ ob.matrix_world)
+            ob.matrix_world = pivot
+            by_mat.setdefault(ob.data.materials[0].name, []).append(ob)
+        for mat, group in by_mat.items():
+            ctx = bpy.context
+            for o in ctx.view_layer.objects:
+                o.select_set(False)
+            for o in group:
+                o.select_set(True)
+            ctx.view_layer.objects.active = group[0]
+            if len(group) > 1:
+                bpy.ops.object.join()
+            ob = group[0]
+            ob.name = key if mat == 'paint' else f'{key}_{mat}'
+            out.append(ob)
+    return out

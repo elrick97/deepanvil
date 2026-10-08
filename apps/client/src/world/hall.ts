@@ -25,6 +25,13 @@ const GLOW: Record<string, [string, number]> = {
   glow_sky: ['#e6f4ff', 2.4],
   glow_lamp: [PALETTE.lamp, 2.8],
   glow_mushroom: ['#9dff8a', 1.6],
+  // The vault: idle runes are a dim pale blue until Odin's gates light them (world/vault.ts).
+  glow_rune: ['#9fd8ff', 1.8],
+  glow_rune_tests: ['#9fd8ff', 0.5],
+  glow_rune_types: ['#9fd8ff', 0.5],
+  glow_rune_lint: ['#9fd8ff', 0.5],
+  glow_rune_review: ['#9fd8ff', 0.5],
+  glow_vault: ['#ffd27a', 0.9],
 };
 
 export interface Anchor {
@@ -37,6 +44,10 @@ export interface Hall {
   group: THREE.Group;
   anchors: Map<string, Anchor>;
   parts: Map<string, THREE.Object3D>;
+  /** The hall's materials by their Blender name (glow_rune_tests, glow_vault, ...). */
+  materials: Map<string, THREE.Material>;
+  /** Point lights placed from `light_*` anchors (those that fit the quality budget). */
+  lights: Map<string, THREE.PointLight>;
   sun: THREE.DirectionalLight;
   /** Make the furnace roar for a moment (blueprint approved). */
   flare(seconds?: number): void;
@@ -129,11 +140,13 @@ export async function loadHall(q: QualitySettings, url = '/assets/hall.glb'): Pr
     .filter(([k]) => k.startsWith('light_'))
     .sort(([a], [b]) => (a.includes('lamp') ? 0 : 1) - (b.includes('lamp') ? 0 : 1))
     .slice(0, pointBudget);
-  for (const [, a] of extraLights) {
+  const lights = new Map<string, THREE.PointLight>();
+  for (const [name, a] of extraLights) {
     const e = a.extras as { color?: string; intensity?: number; range?: number };
     const l = new THREE.PointLight(e.color ?? PALETTE.lamp, e.intensity ?? 10, e.range ?? 9, 1.8);
     l.position.copy(a.position);
     group.add(l);
+    lights.set(name, l);
   }
 
   // --- The sunbeam: a soft additive cone from the opening to the garden.
@@ -244,7 +257,7 @@ export async function loadHall(q: QualitySettings, url = '/assets/hall.glb'): Pr
   }
 
   return {
-    group, anchors, parts, sun, update,
+    group, anchors, parts, materials, lights, sun, update,
     flare: (seconds = 2.5) => { flareLeft = seconds; },
     setTreasury: (remaining) => { pileTarget = Math.max(0, Math.min(1, remaining)); },
     setHeat: (h) => { heat = Math.max(0, Math.min(1, h)); },

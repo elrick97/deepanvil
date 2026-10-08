@@ -42,6 +42,7 @@ def main():
     for ob in common.NAMED:
         ob.data.transform(ob.matrix_world.inverted())
 
+    paint.join_keep(common.NAMED)
     paint.join_by_material(common.STATIC, prefix='hall')
 
     os.makedirs(os.path.dirname(OUT), exist_ok=True)

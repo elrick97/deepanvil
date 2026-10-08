@@ -28,3 +28,5 @@ TREASURY = (11.0, 0.0, -3.0)
 BELL = (13.5, 0.0, 3.0)
 CART = (9.0, 0.0, 6.5)
 TUNNEL = (20.5, 0.0, -4.0)
+VAULT = (10.0, 0.0, -15.0)              # the Vault of Main, back wall right of the furnace
+VAULT_FACES = (4.0, 0.0, -6.0)           # the door looks out over the hall towards here

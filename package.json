@@ -14,6 +14,7 @@
     "typecheck": "tsc -p packages/shared && tsc -p apps/server && tsc -p apps/client",
     "assets": "node scripts/run-blender.mjs -b --factory-startup --python assets/src/build.py -- && node scripts/optimize-glb.mjs apps/client/public/assets/hall.glb",
     "assets:crew": "node scripts/run-blender.mjs -b --factory-startup --python assets/src/build_crew.py -- && node scripts/optimize-glb.mjs apps/client/public/assets/crew.glb",
+    "assets:odin": "node scripts/run-blender.mjs -b --factory-startup --python assets/src/build_odin.py -- && node scripts/optimize-glb.mjs apps/client/public/assets/odin.glb",
     "assets:coin": "node scripts/run-blender.mjs -b --factory-startup --python assets/src/build_coin.py -- && node scripts/optimize-glb.mjs apps/client/public/assets/coin.glb",
     "forge:install": "bash scripts/install-service.sh",
     "forge:start": "node scripts/forge-start.mjs",

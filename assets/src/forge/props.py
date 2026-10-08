@@ -344,7 +344,7 @@ def lanterns():
 def clutter():
     """Barrels, crates and sacks tucked along the walls."""
     spots = [(-15.5, 0, -3.0), (-16.0, 0, -1.2), (15.5, 0, -8.0), (16.5, 0, -6.5), (-8.0, 0, -14.0),
-             (7.5, 0, -14.5), (12.5, 0, 8.5), (-14.0, 0, 7.0), (5.0, 0, -15.0)]
+             (14.0, 0, -11.5), (12.5, 0, 8.5), (-14.0, 0, 7.0)]  # the vault takes the back right
     for i, (x, _, z) in enumerate(spots):
         p = P(x, 0, z)
         g = Prop(f'clutter_{i}', p, yaw=rng.random() * 6.3)

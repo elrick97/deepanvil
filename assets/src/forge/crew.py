@@ -40,12 +40,12 @@ BONES = [
 ]
 
 
-def skeleton():
-    arm = bpy.data.armatures.new('dwarf_rig')
-    rig = link(bpy.data.objects.new('dwarf', arm))
+def skeleton(bones=None, arm_name='dwarf_rig', name='dwarf'):
+    arm = bpy.data.armatures.new(arm_name)
+    rig = link(bpy.data.objects.new(name, arm))
     bpy.context.view_layer.objects.active = rig
     bpy.ops.object.mode_set(mode='EDIT')
-    for name, head, tail, parent in BONES:
+    for name, head, tail, parent in bones or BONES:
         b = arm.edit_bones.new(name)
         b.head, b.tail = head, tail
         if parent:

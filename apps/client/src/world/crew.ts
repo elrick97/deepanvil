@@ -247,13 +247,19 @@ export class Crew {
     this.spotTaken.set(spot, m.dwarf.id);
   }
 
-  private headOf(m: Member): () => THREE.Vector3 {
+  /** A live head position for a crew member (Odin's ravens deliver notes there). */
+  headOf(id: string): (() => THREE.Vector3) | undefined {
+    const m = this.members.get(id);
+    return m && this.headFor(m);
+  }
+
+  private headFor(m: Member): () => THREE.Vector3 {
     const v = new THREE.Vector3();
     return () => v.copy(m.root.position).setY(m.root.position.y + 1.95 * m.scale);
   }
 
   private say(m: Member, text: string, seconds = 3.5, kind: 'talk' | 'ask' | 'note' = 'talk'): void {
-    this.bubbles.say(this.headOf(m), text, seconds, kind, m.dwarf.id);
+    this.bubbles.say(this.headFor(m), text, seconds, kind, m.dwarf.id);
   }
 
   private fly(to: THREE.Vector3, done?: () => void): void {
@@ -265,13 +271,28 @@ export class Crew {
   // ------------------------------------------------------------------ events
 
   private offeringOwner = new Map<string, string>(); // offeringId -> smith id
+  private offered = new Set<string>(); // offeringId:revision already carried to the scales
+  /** Called when a smith lays their piece on Odin's scales. */
+  onOffer?: (offeringId: string) => void;
+
+  /** Carry the piece to Odin's scales, set it down, and head back to the anvil. */
+  private offerTrip(m: Member, offeringId: string): void {
+    if (m.ringing) return this.onOffer?.(offeringId);
+    this.goTo(m, 'offer_spot', () => {
+      this.play(m, 'bellows', 1.3);
+      setTimeout(() => this.onOffer?.(offeringId), 700);
+      setTimeout(() => {
+        if (m.at === 'offer_spot') this.goTo(m, 'home', () => this.play(m, 'idle'));
+      }, 1700);
+    });
+  }
 
   handle(e: ForgeEvent): void {
     if (e.type === 'offering.opened') this.offeringOwner.set(e.offeringId, e.dwarfId);
     if (e.type === 'offering.state' || e.type === 'offering.merged') {
       const m = this.members.get(this.offeringOwner.get(e.offeringId) ?? '');
       if (m && e.type === 'offering.merged') {
-        this.play(m, 'cheer', 1.25, true);
+        if (!m.path.length) this.play(m, 'cheer', 1.25, true);
         if (m.anvilTop) this.audio.cheer(m.anvilTop);
       } else if (m && e.type === 'offering.state' && e.state === 'sent_back') {
         this.play(m, 'slump', 2.2);
@@ -313,10 +334,10 @@ export class Crew {
         const to = this.members.get(e.toDwarfId);
         if (!to) return;
         // From 'pip' (no member): Pip sets off from wherever it is.
-        const start = from ? this.headOf(from)() : (this.sprite?.position.clone() ?? this.headOf(to)());
+        const start = from ? this.headFor(from)() : (this.sprite?.position.clone() ?? this.headFor(to)());
         this.fly(start, () =>
-          this.fly(this.headOf(to)(), () => {
-            this.bubbles.say(this.headOf(to), `📜 ${e.note}`, 3.5, 'note', `pip-${to.dwarf.id}`);
+          this.fly(this.headFor(to)(), () => {
+            this.bubbles.say(this.headFor(to), `📜 ${e.note}`, 3.5, 'note', `pip-${to.dwarf.id}`);
             const home = this.hall.anchors.get('sprite_home')?.position;
             if (home) this.fly(home);
           }),
@@ -398,14 +419,20 @@ export class Crew {
       case 'banter':
         this.say(m, e.line, 3.5);
         break;
-      case 'offering.opened':
-        if (e.lines) this.say(m, e.revision > 1 ? 'Back to Odin’s scales!' : 'To Odin’s scales!', 2.5);
+      case 'offering.opened': {
+        const key = `${e.offeringId}:${e.revision}`;
+        if (!this.offered.has(key)) {
+          this.offered.add(key);
+          this.offerTrip(m, e.offeringId);
+          this.say(m, e.revision > 1 ? 'Back to Odin’s scales!' : 'To Odin’s scales!', 2.5);
+        }
         break;
+      }
       case 'usage.tick': {
         const treasury = this.hall.anchors.get('treasury')?.position;
         if (!treasury) break;
         const tokens = e.inputTokens + e.outputTokens;
-        this.fx.coinsTo(treasury, this.headOf(m)(), Math.min(6, 1 + Math.floor(tokens / 1500)));
+        this.fx.coinsTo(treasury, this.headFor(m)(), Math.min(6, 1 + Math.floor(tokens / 1500)));
         this.audio.coins(treasury);
         break;
       }

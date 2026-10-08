@@ -166,7 +166,7 @@ blueprint, and watch.
 | `npm run doctor` | Check prerequisites; explains every fix |
 | `npm run dev` | Client dev server on :5173 (proxies to the forge) |
 | `npm run forge:restart` / `forge:log` | Restart the forge after server changes / tail its log |
-| `npm run assets` · `assets:crew` · `assets:coin` | Rebuild the hall, crew or coin in headless Blender |
+| `npm run assets` · `assets:crew` · `assets:odin` · `assets:coin` | Rebuild the hall, crew, Odin or coin in headless Blender |
 | `npm run typecheck` | TypeScript across all packages |
 | `bash scripts/server.sh selftest` (WSL) | Zero-token orchestration + permission self-test (also runs in CI) |
 | `MOCK=1` | Run the quest simulator instead of real agents |
@@ -229,7 +229,6 @@ it at anything you care about.
   without a test command Odin can only review, and says so.
 - **Subscription limits are real**: a small quest costs roughly 20 gold coins (≈ $0.20 at API
   list prices); several parallel smiths can hit your 5-hour window.
-- Odin and the Vault of Main exist as designs and concept models but aren't in the 3D world yet.
 - The crew's names and looks are placeholders.
 
 ## Roadmap
@@ -237,7 +236,7 @@ it at anything you care about.
 | Version | Focus |
 |---|---|
 | **v0.1 — early alpha** (now) | The full loop: blueprint → parallel smiths → Odin's gates & review → green `main`; treasury, phone app, push, sandbox |
-| **v0.2** | Odin and the vault in the world ([design](docs/ODIN.md)); tap-a-dwarf cards; per-command animations (slate with the running command, to-do chalkboards); the quest board |
+| **v0.2** | ✓ Odin and the vault in the world ([design](docs/ODIN.md)); tap-a-dwarf cards; per-command animations (slate with the running command, to-do chalkboards); the quest board |
 | **v0.3** | Pick projects from the UI; GitHub PR mode (push, CI, merge via `gh`); native Linux/macOS scripts |
 | **v1.0** | Stable: mileage on real projects, docs, crew lore |
 

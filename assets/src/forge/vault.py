@@ -1,14 +1,17 @@
 """The Vault of Main: a great round rune-door in the back wall, guarded by Odin.
 
-Pieces the client will drive (keep=True): the door (swings open on a merge), the three
-gate rune rings + the review rune (light up per gate), the scales (tip when judging).
+Pieces the client drives: the door with its rune rings (one `vault_door*` node per material,
+pivoting at the door's centre; it spins and swings open on a merge), the scales beam and pans
+(they tip while Odin judges), the braziers. Every gate's runes share one material
+(glow_rune_<gate>), so the door ring and its standing stone light together.
 Authored around a local origin: +Y is into the wall, the door faces -Y (the hall).
 """
 import math
 
-from mathutils import Vector
+import bmesh
+from mathutils import Vector, noise
 
-from .common import Prop, anchor, ball, box, cyl, flat, rng, scale, smooth_by_angle, wobble
+from .common import Prop, anchor, ball, box, cyl, flat, rng, scale, smooth_by_angle, wobble, yaw_to
 from .shapes import lathe, prism
 
 STONE, STONE_DARK, IRON, BRONZE, GOLD = '#9a8573', '#6f5c4e', '#4f4c58', '#c08a3e', '#f2c14e'
@@ -21,8 +24,40 @@ def _rot_x(bm):
     return rot(bm, math.pi / 2, 0, 0)
 
 
+R = 2.4                 # door radius
+DOOR_Z = R + 0.15       # door centre height
+
+
+def backing(v: Prop):
+    """The rock face the vault is carved into, and the deep recess behind the door."""
+    wall = bmesh.new()
+    bmesh.ops.create_grid(wall, x_segments=26, y_segments=22, size=1.0)
+    for vert in wall.verts:
+        x, z = vert.co.x * 6.8, (vert.co.y + 1) * 4.4 - 0.6
+        y = 0.4 + (abs(x) / 6.8) ** 2 * 2.2 + max(0.0, z - 5.8) * 0.5
+        y += noise.noise(Vector((x * 0.55, 3.0, z * 0.55))) * 0.35 * min(1.0, abs(x) / 3.5 + max(0.0, z - 5.8))
+        vert.co = Vector((x, y, z))
+    hole = [f for f in wall.faces if (f.calc_center_median().xz - Vector((0, DOOR_Z))).length < R + 0.25]
+    bmesh.ops.delete(wall, geom=hole, context='FACES')
+    v.part(flat(wall), '#9a8170')
+    recess = cyl(R + 0.1, R + 0.1, 1.3, seg=32, cap=False)
+    bmesh.ops.reverse_faces(recess, faces=recess.faces)  # seen from inside
+    _rot_x(recess)
+    v.part(recess, '#3a2a20', at=(0, 1.6, DOOR_Z))
+    v.part(_rot_x(cyl(R + 0.1, R + 0.1, 0.05, seg=32)), '#2a1d16', at=(0, 1.65, DOOR_Z), ao=False)
+    # What the door guards: main, as a warm gold light deep inside and a heap of ingots.
+    hoard = _rot_x(cyl(R - 0.5, R - 0.5, 0.04, seg=28))
+    v.part(hoard, '#ffd27a', mat='glow_vault', at=(0, 1.55, DOOR_Z), ao=False)
+    heap = ball(1.0, 2)
+    scale(heap, 1.5, 0.5, 0.45)
+    wobble(heap, 0.08, 2.5, 43)
+    v.part(flat(heap), '#f2c14e', mat='gold', at=(0, 1.05, 0.1))
+    for k in range(9):
+        x, y, z = rng.uniform(-1.1, 1.1), rng.uniform(0.75, 1.35), 0.32 + rng.random() * 0.12
+        v.part(box(0.36, 0.16, 0.12, bev=0.03), '#f2c14e', mat='gold', at=(x, y, z), rz=rng.uniform(-0.6, 0.6))
+
+
 def door_and_frame(v: Prop):
-    R = 2.4
     # Stone arch: a ring of wedge blocks around the door.
     n = 18
     for i in range(n):
@@ -38,23 +73,25 @@ def door_and_frame(v: Prop):
         wobble(blk, 0.03, 2, i)
         flat(blk)
         _rot_x(blk)
-        v.part(blk, rng.choice([STONE, '#a48e7b', STONE_DARK]), at=(0, 0.45, R + 0.15))
-    # The door itself (separate node: it swings open).
-    door = cyl(R, R, 0.35, seg=40)
+        v.part(blk, rng.choice([STONE, '#a48e7b', STONE_DARK]), at=(0, 0.45, DOOR_Z))
+    # The door and everything on its face are joined into vault_door* nodes that pivot at
+    # the door's centre (it spins, then swings open).
+    # (a lathe with inner rings, so the painted shading has vertices across the face)
+    door = lathe([(0.0, 0.0), (0.8, 0.0), (1.6, 0.0), (R, 0.0), (R, 0.35), (1.6, 0.35), (0.8, 0.35), (0.0, 0.35)], seg=40)
     smooth_by_angle(door, 0.6)
     _rot_x(door)
-    v.part(door, '#7d6a5c', at=(0, 0.3, R + 0.15), name='vault_door', keep=True)
+    v.part(door, '#7d6a5c', at=(0, 0.3, DOOR_Z), join='vault_door')
     # Iron spokes and rim on the door face.
     rim = lathe([(R - 0.12, 0), (R + 0.02, 0.0), (R + 0.02, 0.08), (R - 0.12, 0.08)], seg=48, cap_bottom=False, cap_top=False)
     _rot_x(rim)
-    v.part(rim, IRON, at=(0, -0.02, R + 0.15), name='vault_door_rim', keep=True)
+    v.part(rim, IRON, at=(0, -0.02, DOOR_Z), join='vault_door')
     for k in range(8):
         a = k * math.pi / 4
         spoke = box(0.12, 0.06, R * 2 - 0.4, bev=0.015)
         from .common import move, rot
         move(spoke, 0, 0, -(R - 0.2))
         rot(spoke, 0, a, 0)
-        v.part(spoke, IRON, at=(0, -0.08, R + 0.15), name=f'vault_spoke_{k}', keep=True)
+        v.part(spoke, IRON, at=(0, -0.08, DOOR_Z), join='vault_door')
     # Rune rings: tests (outer), types (middle), lint (inner), review (the eye at the centre).
     for gate, r, count in (('tests', 1.95, 16), ('types', 1.4, 12), ('lint', 0.9, 8)):
         for k in range(count):
@@ -63,13 +100,16 @@ def door_and_frame(v: Prop):
             from .common import move, rot
             rot(glyph, 0, -a + math.pi / 2, 0)
             move(glyph, math.cos(a) * r, 0, math.sin(a) * r)
-            v.part(glyph, RUNE, mat=f'glow_rune_{gate}', at=(0, -0.08, R + 0.15), name=f'rune_{gate}_{k}', keep=True, ao=False)
+            v.part(glyph, RUNE, mat=f'glow_rune_{gate}', at=(0, -0.08, DOOR_Z), join='vault_door', ao=False)
     eye = lathe([(0.0, 0.0), (0.42, 0.0), (0.42, 0.05), (0.3, 0.07), (0.0, 0.09)], seg=24)
     _rot_x(eye)
-    v.part(eye, RUNE, mat='glow_rune_review', at=(0, -0.03, R + 0.15), name='rune_review', keep=True, ao=False)
+    v.part(eye, RUNE, mat='glow_rune_review', at=(0, -0.03, DOOR_Z), join='vault_door', ao=False)
     pupil = ball(0.13, 2)
-    v.part(pupil, '#1d2433', at=(0, -0.04, R + 0.15), name='rune_review_pupil', keep=True)
-    anchor('vault_door', v.world(0, 0, R + 0.15))
+    v.part(pupil, '#1d2433', at=(0, -0.04, DOOR_Z), join='vault_door')
+    anchor('vault_door', v.world(0, -0.1, DOOR_Z), yaw=v.yaw)
+    anchor('vault_hinge', v.world(-R, -0.1, DOOR_Z), yaw=v.yaw)
+    anchor('vault_inner', v.world(0, 0.6, DOOR_Z))
+    anchor('muninn', v.world(0, 0.45, DOOR_Z + R + 0.78), yaw=v.yaw)
 
 
 def _glyph(seed: int):
@@ -100,22 +140,25 @@ def dais_and_scales(v: Prop):
         flat(step)
         v.part(step, '#a99480', at=(0, -2.6, i * 0.22))
     # The Scales of Judgment, where smiths lay their pieces.
-    sc = Prop('scales', v.world(1.2, -3.3, 0.44), yaw=0.0, keep=True)
-    sc.part(cyl(0.08, 0.06, 1.5, seg=10), BRONZE, name='scales_post')
-    sc.part(cyl(0.25, 0.3, 0.12, seg=14), BRONZE, name='scales_foot')
-    beam = box(1.5, 0.08, 0.08, bev=0.02)
-    sc.part(beam, BRONZE, at=(0, 0, 1.48), name='scales_beam')
-    for side in (-1, 1):
+    sc = Prop('scales', v.world(1.2, -3.3, 0.44), yaw=v.yaw)
+    sc.part(cyl(0.08, 0.06, 1.5, seg=10), BRONZE)
+    sc.part(cyl(0.25, 0.3, 0.12, seg=14), BRONZE)
+    sc.part(ball(0.09, 2), GOLD, at=(0, 0, 1.47))
+    # The beam tips about its centre; each pan (with its chains) hangs from one end.
+    sc.part(box(1.5, 0.08, 0.08, bev=0.02), BRONZE, at=(0, 0, 1.48), join='scales_beam')
+    for side, lr in ((-1, 'l'), (1, 'r')):
+        pan = lathe([(0.0, 0.0), (0.24, 0.0), (0.28, 0.06), (0.0, 0.06)], seg=18)
+        sc.part(pan, BRONZE, at=(side * 0.7, 0, 0.9), join=f'scales_pan_{lr}')
         for k in range(3):
             a = 2 * math.pi * k / 3
             chain = cyl(0.012, 0.012, 0.55, seg=4)
-            sc.part(chain, IRON, at=(side * 0.7 + math.cos(a) * 0.14, math.sin(a) * 0.14, 0.95), name=f'scales_chain_{side}_{k}')
-        pan = lathe([(0.0, 0.0), (0.24, 0.0), (0.28, 0.06), (0.0, 0.06)], seg=18)
-        sc.part(pan, BRONZE, at=(side * 0.7, 0, 0.9), name=f'scales_pan_{"l" if side < 0 else "r"}')
-    sc.part(box(0.26, 0.1, 0.06, bev=0.015), '#ff8a2a', mat='glow_ember', at=(-0.7, 0, 0.98), name='scales_offering', ao=False)
-    anchor('scales', v.world(1.2, -3.3, 1.4))
-    anchor('odin', v.world(-0.6, -3.1, 0.44))  # local -Y: faces the hall, like the vault
-    anchor('offer_spot', v.world(1.2, -4.3, 0.44))
+            sc.part(chain, IRON, at=(side * 0.7 + math.cos(a) * 0.14, math.sin(a) * 0.14, 0.95), join=f'scales_pan_{lr}')
+    # The smith's piece on the left pan (the client hides it until an offering is laid there).
+    sc.part(box(0.26, 0.1, 0.06, bev=0.015), '#ff8a2a', mat='glow_ember', at=(-0.7, 0, 0.98), join='scales_pan_l', ao=False)
+    anchor('scales', sc.world(0, 0, 1.48), yaw=v.yaw)
+    anchor('odin', v.world(-0.6, -3.1, 0.44), yaw=v.yaw)  # faces the hall, like the vault
+    spot = v.world(1.0, -6.5, 0.0)
+    anchor('offer_spot', spot, yaw=yaw_to(spot, sc.world(-0.7, 0, 0)))
 
 
 def rune_stones(v: Prop):
@@ -129,7 +172,7 @@ def rune_stones(v: Prop):
         p.part(mono, rng.choice([STONE, '#8f7a68']))
         for k in range(3):
             g = _glyph(k * 3 + i)
-            p.part(g, RUNE, mat=f'glow_rune_{gate}', at=(0, -0.33, 0.9 + k * 0.42), name=f'stone_rune_{gate}_{k}', keep=True, ao=False)
+            p.part(g, RUNE, mat=f'glow_rune_{gate}', at=(0, -0.33, 0.9 + k * 0.42), ao=False)
         anchor(f'gate_{gate}', p.world(0, -0.5, 1.4))
 
 
@@ -147,6 +190,7 @@ def braziers(v: Prop):
 
 def build(at: Vector, yaw: float = 0.0):
     v = Prop('vault', at, yaw=yaw)
+    backing(v)
     door_and_frame(v)
     dais_and_scales(v)
     rune_stones(v)

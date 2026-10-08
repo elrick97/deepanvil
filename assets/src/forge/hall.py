@@ -5,8 +5,9 @@ import bmesh
 from mathutils import Matrix, Vector, noise
 
 from . import layout as L
+from . import vault
 from .common import (P, Prop, anchor, ball, box, cyl, flat, make, merge, move, rng, rot, scale,
-                     smooth_by_angle, subdivide, wobble)
+                     smooth_by_angle, subdivide, wobble, yaw_to)
 from .shapes import lathe, sector
 
 
@@ -164,7 +165,7 @@ def rocks():
         a = k / 26 * 2 * math.pi + rng.uniform(-0.08, 0.08)
         rr = 18.2 + rng.random() * 2.4
         p = Vector((math.cos(a) * rr, math.sin(a) * rr, 0))
-        if (p - tunnel).length < 4.5 or (p - furnace).length < 5:
+        if (p - tunnel).length < 4.5 or (p - furnace).length < 5 or (p - P(*L.VAULT)).length < 7:
             continue
         h = 1.5 + rng.random() * 4.5
         bm = lathe([(0.9 + rng.random() * 0.6, 0), (0.7, h * 0.35), (0.35, h * 0.75), (0.05, h)], seg=8)
@@ -199,7 +200,7 @@ def crystals():
         a = k / 12 * 2 * math.pi + rng.uniform(-0.15, 0.15)
         rr = 17.3 + rng.random() * 1.5
         base = Vector((math.cos(a) * rr, math.sin(a) * rr, 0))
-        if (base - tunnel).length < 4.5 or (base - furnace).length < 6:
+        if (base - tunnel).length < 4.5 or (base - furnace).length < 6 or (base - P(*L.VAULT)).length < 7:
             continue
         cl = Prop(f'crystal_{k}', base, yaw=rng.random() * 6.3)
         for j in range(4 + rng.randrange(5)):
@@ -253,3 +254,5 @@ def build():
     rocks()
     crystals()
     tunnel()
+    at = P(*L.VAULT)
+    vault.build(at, yaw_to(at, P(*L.VAULT_FACES)))

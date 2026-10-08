@@ -16,6 +16,7 @@ import { FrameGovernor, initialQuality, isTouchDevice } from './quality.ts';
 import { Crew, loadCrewKit } from './world/crew.ts';
 import { Fx, loadCoin } from './world/fx.ts';
 import { loadHall } from './world/hall.ts';
+import { loadOdinKit, Vault } from './world/vault.ts';
 import { kuwahara } from './world/painterly.ts';
 
 const quality = initialQuality();
@@ -56,7 +57,7 @@ controls.autoRotate = true;
 controls.autoRotateSpeed = 0.25;
 controls.addEventListener('start', () => (controls.autoRotate = false));
 
-const [hall, crewKit, coinGeo] = await Promise.all([loadHall(quality), loadCrewKit(), loadCoin()]);
+const [hall, crewKit, odinKit, coinGeo] = await Promise.all([loadHall(quality), loadCrewKit(), loadOdinKit(), loadCoin()]);
 scene.add(hall.group);
 
 const fx = new Fx(coinGeo);
@@ -87,8 +88,12 @@ const crew = new Crew(fx, hall, crewKit, bubbles, audio);
 const questBanner = new QuestBanner(document.querySelector('#quest')!, crew.names);
 crew.setRoster(CREW); // show the crew immediately; the server's roster replaces it on connect
 scene.add(crew.group);
+const vault = new Vault(hall, odinKit, bubbles, audio, fx);
+vault.locate = (id) => crew.headOf(id);
+crew.onOffer = (offeringId) => vault.receive(offeringId);
+scene.add(vault.group);
 
-if (import.meta.env.DEV) Object.assign(window, { THREE, scene, camera, controls, crew, fx, hall });
+if (import.meta.env.DEV) Object.assign(window, { THREE, scene, camera, controls, crew, fx, hall, vault });
 
 // Bloom over the HDR scene: only emissives, sparks and the sky opening are bright enough to bleed.
 const pipeline = new THREE.RenderPipeline(renderer);
@@ -124,6 +129,7 @@ const offeringCards = new OfferingCards(document.querySelector('#offerings')!, (
 const alerts = new Alerts(document.querySelector('.hud-meta')!, (cmd) => link.send(cmd));
 const dispatch = (e: ForgeEvent): void => {
   crew.handle(e);
+  vault.handle(e);
   questBanner.handle(e);
   forgeControls.handle(e);
   offeringCards.handle(e);
@@ -160,6 +166,7 @@ renderer.setAnimationLoop(() => {
   controls.update(dt);
   hall.update(t, dt);
   crew.update(t, dt);
+  vault.update(t, dt);
   fx.update(t, dt);
   bubbles.update(t);
   audio.update(camera);
