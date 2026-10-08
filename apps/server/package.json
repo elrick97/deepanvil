@@ -1,0 +1,20 @@
+{
+  "name": "@deepanvil/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.293",
+    "@deepanvil/shared": "*",
+    "web-push": "^3.6.7",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/web-push": "^3.6.4",
+    "@types/ws": "^8.18.2"
+  }
+}

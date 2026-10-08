@@ -1,0 +1,5 @@
+* text=auto
+*.sh text eol=lf
+*.glb binary
+*.ktx2 binary
+*.blend binary

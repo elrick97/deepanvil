@@ -1,0 +1,160 @@
+import type { HookCallback } from '@anthropic-ai/claude-agent-sdk';
+import type { Dwarf } from '@deepanvil/shared';
+import { MODELS, SANDBOX_READY } from './engine.ts';
+import type { BlueprintTask } from './forgemaster.ts';
+import { isTestCommand, judge, kindOf } from './permissions.ts';
+import { runAgent, type Emit, type Ledger } from './run.ts';
+import { digest } from './sprite.ts';
+
+// A Sonnet smith at their anvil: one scoped task, in their own git worktree.
+// Hooks turn every tool call into a world event; oversized tool output is digested by
+// Pip (Haiku) before Sonnet reads it; anything risky rings the bell and waits for you.
+
+export interface SmithOutcome {
+  status: 'done' | 'stuck';
+  testsPassed: boolean;
+  summary: string;
+}
+
+// Appended to the shared Claude Code preset. Kept identical for every smith and task so the
+// whole system prompt is one cached prefix across the crew (task details go in the prompt).
+const RULES = `You are a smith of Deepanvil, working one scoped task in your own git worktree (your cwd).
+- Stay inside your worktree. Read the files in your context pack first; explore further only if needed.
+- Make the smallest change that satisfies the brief, matching the code's existing conventions.
+- Change files with the Edit/Write tools, never with shell redirection or heredocs (those ring the human's bell).
+- Do not install packages or use the network unless truly required (it will ask a human).
+- When done: run the acceptance command, then commit your work (git add -A && git commit -m "<summary>").
+- Finish with the structured result. testsPassed means the acceptance command succeeded.`;
+
+const OUTCOME_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['status', 'testsPassed', 'summary'],
+  properties: {
+    status: { type: 'string', enum: ['done', 'stuck'] },
+    testsPassed: { type: 'boolean' },
+    summary: { type: 'string', description: 'What you changed and how you verified it, or why you are stuck (max 5 sentences)' },
+  },
+};
+
+const DIGEST_OVER = 6000; // characters of tool output before Pip compresses it
+
+export interface SmithRun {
+  smith: Dwarf;
+  task: BlueprintTask;
+  worktree: string;
+  attempt: number;
+  notes?: string;
+  emit: Emit;
+  ledger: Ledger;
+  /** Ring the bell; resolves when the human answers. */
+  ask: (action: string) => Promise<boolean>;
+}
+
+function outputText(resp: unknown): string {
+  if (typeof resp === 'string') return resp;
+  const r = resp as { stdout?: string; stderr?: string } | null;
+  if (r && (typeof r.stdout === 'string' || typeof r.stderr === 'string')) return `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
+  return JSON.stringify(resp ?? '');
+}
+
+export async function runSmith(run: SmithRun): Promise<SmithOutcome> {
+  const { smith, task, worktree, emit, ledger } = run;
+  let testEvents = 0;
+
+  const pre: HookCallback = async (input) => {
+    if (input.hook_event_name !== 'PreToolUse') return {};
+    const toolInput = (input.tool_input ?? {}) as Record<string, unknown>;
+    const kind = kindOf(input.tool_name, toolInput);
+    if (kind) {
+      const summary = String(toolInput.command ?? toolInput.file_path ?? toolInput.pattern ?? input.tool_name).slice(0, 120);
+      emit({ type: 'tool', dwarfId: smith.id, taskId: task.id, kind, summary });
+    }
+    return {};
+  };
+
+  const post: HookCallback = async (input) => {
+    if (input.hook_event_name === 'PostToolUseFailure' && input.tool_name === 'Bash') {
+      const command = String((input.tool_input as { command?: string })?.command ?? '');
+      if (isTestCommand(command)) {
+        testEvents++;
+        emit({ type: 'test.fail', dwarfId: smith.id, taskId: task.id, attempt: run.attempt });
+      }
+      return {};
+    }
+    if (input.hook_event_name !== 'PostToolUse' || input.tool_name !== 'Bash') return {};
+    const command = String((input.tool_input as { command?: string })?.command ?? '');
+    if (isTestCommand(command)) {
+      testEvents++;
+      emit({ type: 'test.pass', dwarfId: smith.id, taskId: task.id });
+    }
+    const text = outputText(input.tool_response);
+    if (text.length <= DIGEST_OVER) return {};
+    // Token min-max: Haiku compresses the noise so Sonnet reads ~10x less.
+    const short = await digest(text, command, emit, ledger);
+    emit({ type: 'haiku.digest', fromDwarfId: 'pip', toDwarfId: smith.id, note: `${Math.round(text.length / 1000)}k chars of output → ${Math.round(short.length / 100) / 10}k` });
+    const resp = input.tool_response as Record<string, unknown> | string;
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        updatedToolOutput: typeof resp === 'object' && resp && 'stdout' in resp ? { ...resp, stdout: `[digested by Pip]\n${short}`, stderr: '' } : `[digested by Pip]\n${short}`,
+      },
+    };
+  };
+
+  const prompt = [
+    `# Task: ${task.title} (attempt ${run.attempt})`,
+    task.brief,
+    '',
+    '## Context pack',
+    ...task.files.map((f) => `- ${f.path} — ${f.why}`),
+    '',
+    `## Acceptance\n${task.acceptance}`,
+    run.notes ? `\n## Notes from the previous attempt\n${run.notes}` : '',
+  ].join('\n');
+
+  const r = await runAgent(
+    {
+      dwarfId: smith.id,
+      model: MODELS.sonnet,
+      prompt,
+      options: {
+        cwd: worktree,
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: RULES },
+        disallowedTools: ['Task', 'Agent', 'WebSearch'],
+        permissionMode: 'default',
+        // Defence in depth: the OS sandbox when available (see engine.ts), never silently skipped.
+        ...(SANDBOX_READY ? { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: false } } : {}),
+        maxTurns: 60,
+        effort: 'medium',
+        env: { ...process.env, GIT_AUTHOR_NAME: smith.name, GIT_AUTHOR_EMAIL: `${smith.id}@deepanvil.local`, GIT_COMMITTER_NAME: smith.name, GIT_COMMITTER_EMAIL: `${smith.id}@deepanvil.local` },
+        outputFormat: { type: 'json_schema', schema: OUTCOME_SCHEMA },
+        hooks: {
+          PreToolUse: [{ hooks: [pre] }],
+          PostToolUse: [{ hooks: [post] }],
+          PostToolUseFailure: [{ hooks: [post] }],
+        },
+        canUseTool: async (tool, input) => {
+          const v = judge(tool, input, worktree);
+          if (v.kind === 'allow') return { behavior: 'allow', updatedInput: input };
+          if (v.kind === 'deny') return { behavior: 'deny', message: v.message };
+          return (await run.ask(v.action))
+            ? { behavior: 'allow', updatedInput: input }
+            : { behavior: 'deny', message: 'The human said no at the bell. Find another way, or report that you are stuck.' };
+        },
+      },
+    },
+    emit,
+    ledger,
+  );
+
+  const out: SmithOutcome =
+    r.subtype === 'success' && r.structured_output
+      ? (r.structured_output as SmithOutcome)
+      : { status: 'stuck', testsPassed: false, summary: r.subtype === 'success' ? r.result.slice(0, 800) : `Engine stopped: ${r.subtype}` };
+  // The world needs to see a verdict even if no test command was recognised.
+  if (testEvents === 0) {
+    emit(out.testsPassed ? { type: 'test.pass', dwarfId: smith.id, taskId: task.id } : { type: 'test.fail', dwarfId: smith.id, taskId: task.id, attempt: run.attempt });
+  }
+  return out;
+}

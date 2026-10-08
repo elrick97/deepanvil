@@ -1,0 +1,17 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*
+# Blender autosaves / backups
+*.blend1
+*.blend@
+assets/out/*.blend
+__pycache__/
+*.pyc
+apps/client/dist/
+
+# Stray outputs and third-party code that must never be committed
+/--save
+/buffer.bin
+tools/blender/blender_mcp_addon.py

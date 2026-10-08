@@ -1,0 +1,27 @@
+{
+  "name": "deepanvil",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @deepanvil/client",
+    "build": "npm run build -w @deepanvil/client",
+    "server": "wsl -d Ubuntu -- bash scripts/server.sh",
+    "typecheck": "tsc -p packages/shared && tsc -p apps/server && tsc -p apps/client",
+    "assets": "node scripts/run-blender.mjs -b --factory-startup --python assets/src/build.py -- && node scripts/optimize-glb.mjs apps/client/public/assets/hall.glb",
+    "assets:crew": "node scripts/run-blender.mjs -b --factory-startup --python assets/src/build_crew.py -- && node scripts/optimize-glb.mjs apps/client/public/assets/crew.glb",
+    "assets:coin": "node scripts/run-blender.mjs -b --factory-startup --python assets/src/build_coin.py -- && node scripts/optimize-glb.mjs apps/client/public/assets/coin.glb",
+    "forge:install": "bash scripts/install-service.sh",
+    "forge:start": "node scripts/forge-start.mjs",
+    "forge:restart": "wsl -d Ubuntu -- pkill -f \"[a]pps/server/src/index.ts\"",
+    "forge:log": "wsl -d Ubuntu -- tail -n 40 -f ~/.deepanvil/forge.log"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  },
+  "license": "MIT"
+}
