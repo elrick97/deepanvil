@@ -1,7 +1,7 @@
 import { MODELS } from './engine.ts';
 import { runAgent, type Emit, type Ledger } from './run.ts';
 
-// Thráin, the Forgemaster (Opus). Plans and re-plans; never writes implementation code.
+// Thráin, the Forgemaster (Opus). Plans and re-plans; never writes code or reviews it (Odin does).
 // The blueprint carries a context pack per task (exact files + why), so Sonnet smiths
 // start focused instead of re-exploring the repo — the biggest token saving in the forge.
 
@@ -115,34 +115,4 @@ export async function replan(task: BlueprintTask, failureNotes: string, repo: st
   );
   if (r.subtype !== 'success' || !r.structured_output) return task;
   return { ...(r.structured_output as BlueprintTask), id: task.id };
-}
-
-/** Review a finished task from Pip's diff summary (not the raw diff). */
-export async function review(task: BlueprintTask, diffSummary: string, smithSummary: string, emit: Emit, ledger: Ledger): Promise<{ approve: boolean; note: string }> {
-  const r = await runAgent(
-    {
-      dwarfId: 'thrain',
-      model: MODELS.opus,
-      prompt: [
-        'Review a smith\'s finished task before it is merged. Approve unless the change clearly misses the brief or is risky.',
-        `<task>${JSON.stringify(task)}</task>`,
-        `<smith_report>${smithSummary}</smith_report>`,
-        `<diff_summary>${diffSummary}</diff_summary>`,
-      ].join('\n'),
-      options: {
-        systemPrompt: SYSTEM,
-        tools: [],
-        maxTurns: 1,
-        effort: 'low',
-        outputFormat: {
-          type: 'json_schema',
-          schema: { type: 'object', additionalProperties: false, required: ['approve', 'note'], properties: { approve: { type: 'boolean' }, note: { type: 'string', description: 'one sentence' } } },
-        },
-      },
-    },
-    emit,
-    ledger,
-  );
-  if (r.subtype !== 'success' || !r.structured_output) return { approve: true, note: 'No review verdict; merging on green tests.' };
-  return r.structured_output as { approve: boolean; note: string };
 }

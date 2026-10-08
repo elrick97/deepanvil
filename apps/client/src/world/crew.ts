@@ -264,7 +264,22 @@ export class Crew {
 
   // ------------------------------------------------------------------ events
 
+  private offeringOwner = new Map<string, string>(); // offeringId -> smith id
+
   handle(e: ForgeEvent): void {
+    if (e.type === 'offering.opened') this.offeringOwner.set(e.offeringId, e.dwarfId);
+    if (e.type === 'offering.state' || e.type === 'offering.merged') {
+      const m = this.members.get(this.offeringOwner.get(e.offeringId) ?? '');
+      if (m && e.type === 'offering.merged') {
+        this.play(m, 'cheer', 1.25, true);
+        if (m.anvilTop) this.audio.cheer(m.anvilTop);
+      } else if (m && e.type === 'offering.state' && e.state === 'sent_back') {
+        this.play(m, 'slump', 2.2);
+        const why: Record<string, string> = { conflict: 'It clashes with the vault. Rebase…', too_big: 'Too big, says Odin. Trimming.', gate: 'Odin’s runes went red.', review: 'Odin wants changes.', human: 'Sent back. Fair enough.' };
+        this.say(m, why[e.reason ?? ''] ?? 'Back to the anvil.', 3);
+      }
+      return;
+    }
     switch (e.type) {
       case 'hello':
         return this.setRoster(e.crew);
@@ -382,6 +397,9 @@ export class Crew {
         break;
       case 'banter':
         this.say(m, e.line, 3.5);
+        break;
+      case 'offering.opened':
+        if (e.lines) this.say(m, e.revision > 1 ? 'Back to Odin’s scales!' : 'To Odin’s scales!', 2.5);
         break;
       case 'usage.tick': {
         const treasury = this.hall.anchors.get('treasury')?.position;

@@ -23,7 +23,7 @@ const SAFE_COMMANDS: RegExp[] = [
   /^npx (tsc|vitest|jest|eslint|prettier|tsx)\b/,
   /^(tsc|vitest|jest|eslint|prettier)\b/,
   /^(python3?|pytest) -m (pytest|unittest)\b|^pytest\b/,
-  /^git (status|diff|log|show|add|commit|restore|stash|branch|rev-parse|ls-files)\b(?!.*--(output|ext-diff|exec)\b)/,
+  /^git (status|diff|log|show|add|commit|restore|stash|branch|rev-parse|ls-files|rebase|merge)\b(?!.*(--(output|ext-diff|exec)\b|\s-x\b))/,
 ];
 const NEVER: RegExp[] = [/\bgit push\b/, /\bsudo\b/, /\bgit (reset --hard|clean -[a-z]*f)/];
 

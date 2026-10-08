@@ -110,7 +110,7 @@ export async function runSmith(run: SmithRun): Promise<SmithOutcome> {
     ...task.files.map((f) => `- ${f.path} — ${f.why}`),
     '',
     `## Acceptance\n${task.acceptance}`,
-    run.notes ? `\n## Notes from the previous attempt\n${run.notes}` : '',
+    run.notes ? `\n## Notes from the last round (fix these first; Odin checks every point)\n${run.notes}` : '',
   ].join('\n');
 
   const r = await runAgent(
@@ -127,7 +127,7 @@ export async function runSmith(run: SmithRun): Promise<SmithOutcome> {
         ...(SANDBOX_READY ? { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: false } } : {}),
         maxTurns: 60,
         effort: 'medium',
-        env: { ...process.env, GIT_AUTHOR_NAME: smith.name, GIT_AUTHOR_EMAIL: `${smith.id}@deepanvil.local`, GIT_COMMITTER_NAME: smith.name, GIT_COMMITTER_EMAIL: `${smith.id}@deepanvil.local` },
+        env: { ...process.env, GIT_EDITOR: 'true', GIT_AUTHOR_NAME: smith.name, GIT_AUTHOR_EMAIL: `${smith.id}@deepanvil.local`, GIT_COMMITTER_NAME: smith.name, GIT_COMMITTER_EMAIL: `${smith.id}@deepanvil.local` },
         outputFormat: { type: 'json_schema', schema: OUTCOME_SCHEMA },
         hooks: {
           PreToolUse: [{ hooks: [pre] }],

@@ -2,12 +2,13 @@ import * as THREE from 'three/webgpu';
 import { pass } from 'three/tsl';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { CREW } from '@deepanvil/shared';
+import { CREW, type ForgeEvent } from '@deepanvil/shared';
 import { Soundscape } from './audio.ts';
 import { Bubbles } from './bubbles.ts';
 import { coinsOf } from './coins.ts';
 import { Controls } from './controls.ts';
 import { Hud } from './hud.ts';
+import { OfferingCards } from './offerings.ts';
 import { Alerts } from './push.ts';
 import { QuestBanner } from './quest.ts';
 import { ForgeLink } from './net.ts';
@@ -119,15 +120,20 @@ resize();
 const link = new ForgeLink();
 link.onStatus = (on) => hud.setLink(on);
 const forgeControls = new Controls(document.querySelector('#controls')!, (cmd) => link.send(cmd), crew.names);
+const offeringCards = new OfferingCards(document.querySelector('#offerings')!, (cmd) => link.send(cmd), crew.names);
 const alerts = new Alerts(document.querySelector('.hud-meta')!, (cmd) => link.send(cmd));
-link.on((e) => {
+const dispatch = (e: ForgeEvent): void => {
   crew.handle(e);
   questBanner.handle(e);
   forgeControls.handle(e);
+  offeringCards.handle(e);
   alerts.handle(e);
   hud.gauge(e);
   hud.log(e, crew.names);
-});
+};
+link.on(dispatch);
+// Dev only: replay hand-written events through the world (no server, no tokens).
+if (import.meta.env.DEV) Object.assign(window, { forgeDispatch: dispatch });
 setInterval(() => hud.renderGauges(), 30_000); // keep reset countdowns fresh
 
 // The in-world treasury: the gold pile is what's left of the week, the furnace burns as

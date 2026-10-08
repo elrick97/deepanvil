@@ -1,34 +1,41 @@
 import { existsSync } from 'node:fs';
 import { CREW, type ClientCommand, type Dwarf } from '@deepanvil/shared';
 import type { Store } from '../store.ts';
-import { plan, replan, review, type Blueprint, type BlueprintTask } from './forgemaster.ts';
-import { addWorktree, branchDiff, commitAll, git, mergeBranch, removeWorktree, worktreesDir } from './git.ts';
+import { plan, replan, type Blueprint, type BlueprintTask } from './forgemaster.ts';
+import { policyFor } from './gates.ts';
+import { addWorktree, commitAll, git, removeWorktree, worktreesDir } from './git.ts';
+import { linkDependencies, Odin } from './odin.ts';
+import { sonnetReview, type Reviewer } from './odin-review.ts';
 import { Ledger, type Emit } from './run.ts';
-import { runSmith, type SmithOutcome } from './smith.ts';
-import { banter, summarizeDiff } from './sprite.ts';
+import { runSmith } from './smith.ts';
+import { banter, digest } from './sprite.ts';
 
 // The live forge: request -> Opus blueprint -> your approval -> Sonnet smiths in parallel
-// worktrees (retry once, then escalate to Opus for a re-plan) -> Haiku diff summary ->
-// Opus review -> serialised merges -> the minecart. You can stop a quest at any point.
+// worktrees -> each finished piece is *offered* to Odin, keeper of main (rebase, gates,
+// Sonnet review, fast-forward; docs/ODIN.md). Send-backs return to the same smith; the
+// second failure escalates to Thráin for a re-plan, the third gives up. Stoppable anytime.
 
-const MAX_ATTEMPTS = 3; // 1st try, a retry with notes, then one try on the re-planned task
+const ESCALATE_AT = 2; // failures (smith stuck or Odin send-back) before Thráin re-plans
+const GIVE_UP_AT = 3; // ...and before the task is abandoned
 
 export interface ForgeConfig {
   repo: string;
   smiths: number;
+  /** Odin's merge mode for a repo seen for the first time: "auto" for the sandbox. */
+  defaultMode?: 'auto' | 'approve';
 }
 
 /** The model-backed steps, injectable so the orchestration can be tested without tokens. */
 export interface Agents {
   plan: typeof plan;
   replan: typeof replan;
-  review: typeof review;
   runSmith: typeof runSmith;
-  summarizeDiff: typeof summarizeDiff;
+  reviewer: Reviewer;
+  digest: typeof digest;
   banter: typeof banter;
 }
 
-export const LIVE_AGENTS: Agents = { plan, replan, review, runSmith, summarizeDiff, banter };
+export const LIVE_AGENTS: Agents = { plan, replan, runSmith, reviewer: sonnetReview, digest, banter };
 
 interface PendingQuest {
   id: string;
@@ -49,7 +56,7 @@ export class Forge {
   private questN = 0;
   private askN = 0;
   private answers = new Map<string, (approved: boolean) => void>();
-  private mergeLock: Promise<unknown> = Promise.resolve();
+  private keeper?: Odin;
 
   constructor(emit: Emit, cfg: ForgeConfig, store: Store, agents: Agents = LIVE_AGENTS) {
     this.emit = emit;
@@ -59,8 +66,23 @@ export class Forge {
     this.ledger = new Ledger(store);
   }
 
+  /** Odin for the forge's repo (created on first use: the repo may not exist at startup). */
+  get odin(): Odin {
+    this.keeper ??= new Odin({
+      repo: this.cfg.repo,
+      store: this.store,
+      emit: this.emit,
+      ledger: this.ledger,
+      policy: policyFor(this.store, this.cfg.repo, this.cfg.defaultMode === 'auto'),
+      reviewer: this.agents.reviewer,
+      digest: this.agents.digest,
+    });
+    return this.keeper;
+  }
+
   /** After a restart: retire quests whose agents died, clear their anvils, re-offer a pending blueprint. */
   async recover(): Promise<void> {
+    this.store.abandonOpenOfferings();
     const lost = this.store.interruptUnfinished();
     if (lost.length) this.say(`The forge went cold mid-quest; ${lost.length} quest(s) were interrupted. Their branches are kept.`);
     await this.clearAnvils();
@@ -74,6 +96,7 @@ export class Forge {
     this.emit(this.status());
     this.emit(this.ledger.event());
     this.history();
+    if (existsSync(this.cfg.repo)) void this.odin.checkHealth();
   }
 
   private async clearAnvils(): Promise<void> {
@@ -118,6 +141,17 @@ export class Forge {
       case 'permission.answer':
         this.answers.get(cmd.requestId)?.(cmd.approved);
         break;
+      case 'offering.merge':
+        this.keeper?.answer(cmd.offeringId, true);
+        break;
+      case 'offering.send_back':
+        this.keeper?.answer(cmd.offeringId, false, cmd.note?.slice(0, 2000));
+        break;
+      case 'offering.diff': {
+        const diff = this.keeper?.diff(cmd.offeringId);
+        if (diff !== undefined) this.emit({ type: 'offering.diff', offeringId: cmd.offeringId, diff: diff.slice(0, 400_000) });
+        break;
+      }
     }
   }
 
@@ -130,6 +164,7 @@ export class Forge {
     if (!this.abort || this.abort.signal.aborted) return;
     this.say('Down tools, everyone. The quest is stopped.');
     this.abort.abort();
+    this.keeper?.stop();
     for (const answer of [...this.answers.values()]) answer(false);
   }
 
@@ -195,6 +230,9 @@ export class Forge {
     this.ledger.abort = this.abort;
     this.store.setQuestStatus(quest.id, 'forging');
     this.emit({ type: 'blueprint.approved', questId: quest.id });
+    this.odin.reset();
+    // main may have changed outside the forge since the last check: look before anything is offered.
+    await this.odin.checkHealth();
     const smiths = CREW.filter((d) => d.role === 'smith').slice(0, Math.max(1, this.cfg.smiths));
     const queue = [...quest.blueprint.tasks];
     const merged: string[] = [];
@@ -232,6 +270,7 @@ export class Forge {
   private async runTask(questId: string, smith: Dwarf, task: BlueprintTask): Promise<boolean> {
     const branch = `forge/${questId}/${task.id}`;
     const taskId = task.id;
+    const offeringId = `${questId}-${taskId}`;
     let attempts = 0;
     const record = (status: 'working' | 'merged' | 'failed', summary?: string) =>
       this.store.upsertTask(questId, taskId, task.title, smith.id, status, attempts, summary);
@@ -246,50 +285,48 @@ export class Forge {
       void this.agents.banter(smith.name, `starting "${task.title}"`, this.emit, this.ledger).then((line) => line && this.emit({ type: 'banter', dwarfId: smith.id, line }), () => undefined);
     }
 
+    // The worktree lives until the offering is merged or abandoned: send-backs are fixed in place.
     const worktree = await addWorktree(this.cfg.repo, `${smith.id}-${taskId}`, branch);
+    linkDependencies(this.cfg.repo, worktree);
     try {
-      let outcome: SmithOutcome | undefined;
+      let failures = 0;
+      let revision = 0;
       let notes: string | undefined;
-      for (let attempt = 1; attempt <= MAX_ATTEMPTS && !this.stopped; attempt++) {
-        attempts = attempt;
-        outcome = await this.agents.runSmith({ smith, task, worktree, attempt, notes, emit: this.emit, ledger: this.ledger, ask: (a) => this.ask(smith, a) });
-        await commitAll(worktree, `${task.title} (${smith.name}, attempt ${attempt})`);
-        if (outcome.status === 'done' && outcome.testsPassed) break;
-        notes = outcome.summary;
-        if (attempt === 2 && !this.stopped) {
+      let replanned = false;
+      while (!this.stopped) {
+        attempts++;
+        const outcome = await this.agents.runSmith({ smith, task, worktree, attempt: attempts, notes, emit: this.emit, ledger: this.ledger, ask: (a) => this.ask(smith, a) });
+        await commitAll(worktree, `${task.title} (${smith.name}, attempt ${attempts})`);
+        if (this.stopped) break;
+
+        if (outcome.status === 'done' && outcome.testsPassed) {
+          // Lay it on Odin's scales.
+          revision++;
+          const verdict = await this.odin.offer({ id: offeringId, questId, taskId, dwarfId: smith.id, title: task.title, branch, revision, task });
+          if (verdict.kind === 'merged') {
+            record('merged', outcome.summary);
+            this.store.bumpCrew(smith.id, 'tasks_done');
+            this.emit({ type: 'task.done', questId, taskId, dwarfId: smith.id });
+            return true;
+          }
+          if (verdict.kind === 'abandoned') return fail('Abandoned.');
+          notes = verdict.notes;
+        } else {
+          notes = outcome.summary;
+        }
+
+        failures++;
+        if (failures >= GIVE_UP_AT) return fail(notes ?? 'Failed three times.');
+        if (failures >= ESCALATE_AT && !replanned) {
           // Twice cracked: back to the Forgemaster's table to be re-planned.
-          this.emit({ type: 'escalation', dwarfId: smith.id, taskId, reason: outcome.summary.slice(0, 200) });
+          replanned = true;
+          this.emit({ type: 'escalation', dwarfId: smith.id, taskId, reason: (notes ?? '').slice(0, 200) });
           this.store.bumpCrew(smith.id, 'escalations');
-          task = await this.agents.replan(task, outcome.summary, worktree, this.emit, this.ledger);
+          task = await this.agents.replan(task, notes ?? '', worktree, this.emit, this.ledger);
           this.say(`Redrawn “${task.title}”. Try it this way, ${smith.name}.`);
         }
       }
-      if (this.stopped) return fail('Stopped.');
-      if (!outcome || outcome.status !== 'done' || !outcome.testsPassed) return fail(outcome?.summary ?? 'No outcome.');
-
-      // Review: Haiku condenses the diff, Opus only reads the summary.
-      const diff = await branchDiff(this.cfg.repo, branch);
-      if (!diff) return fail('No changes were committed.');
-      const summary = await this.agents.summarizeDiff(diff, this.emit, this.ledger);
-      this.emit({ type: 'haiku.digest', fromDwarfId: smith.id, toDwarfId: 'thrain', note: `diff → ${summary.split('\n')[0]?.slice(0, 80) ?? 'summary'}` });
-      const verdict = await this.agents.review(task, summary, outcome.summary, this.emit, this.ledger);
-      if (!verdict.approve) {
-        this.say(`Not merging “${task.title}”: ${verdict.note}`);
-        return fail(`Review: ${verdict.note}`);
-      }
-      if (this.stopped) return fail('Stopped.');
-
-      // Merges are serialised: one piece into the main checkout at a time.
-      const merge = this.mergeLock.then(() => mergeBranch(this.cfg.repo, branch, `Deepanvil: ${task.title}`));
-      this.mergeLock = merge.catch(() => undefined);
-      if (!(await merge)) {
-        this.say(`“${task.title}” collides with another piece; it needs a human merge (branch ${branch}).`);
-        return fail('Merge conflict');
-      }
-      record('merged', outcome.summary);
-      this.store.bumpCrew(smith.id, 'tasks_done');
-      this.emit({ type: 'task.done', questId, taskId, dwarfId: smith.id });
-      return true;
+      return fail('Stopped.');
     } finally {
       await removeWorktree(this.cfg.repo, worktree);
     }

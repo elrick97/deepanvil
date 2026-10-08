@@ -27,6 +27,7 @@ bell buzzes your pocket when a smith needs your permission.
   | Thráin, the Forgemaster | Opus | Plans blueprints with a context pack per task, re-plans failures, reviews diff *summaries* |
   | The smiths | Sonnet | One scoped task each, in parallel git worktrees |
   | Pip, the sprite | Haiku | Compresses long tool output and diffs, writes banter |
+  | Odin, keeper of `main` | Sonnet | Rebases each finished piece on `main`, runs tests/types/lint, reviews the real diff, and only then lets it in |
 
   The blueprint names the exact files each smith needs, so Sonnet doesn't re-explore the repo;
   Haiku digests noisy logs before a bigger model reads them; and agent sessions are isolated
@@ -87,9 +88,11 @@ flowchart LR
 The world only reacts to **events** (`packages/shared/src/events.ts`): a simulator and the real
 orchestrator speak the same contract, so the world can be developed without spending tokens.
 
-A quest: *request → Opus blueprint → your approval → Sonnet smiths in parallel worktrees
-(retry once, then escalate to Opus for a re-plan) → Haiku diff summary → Opus review →
-serialized merges → the minecart rolls.*
+A quest: *request → Opus blueprint → your approval → Sonnet smiths in parallel worktrees →
+each finished piece is offered to **Odin**, who rebases it on the latest `main`, runs the gates,
+reviews the real diff (Sonnet) and fast-forwards `main` — or sends it back with notes (the second
+failure escalates to Opus for a re-plan) → the minecart rolls.* `main` only ever moves to a
+tested commit. Design: [docs/ODIN.md](docs/ODIN.md).
 
 ## Repository layout
 
@@ -173,8 +176,10 @@ it at anything you care about.
 - **Residual risk: tests run code.** Auto-approved test/build commands execute project code,
   which a smith can write, so a misbehaving or prompt-injected smith could run arbitrary code
   as your user. Mitigations: the **OS sandbox** (bubblewrap) confines smiths' shell commands to
-  their worktree and blocks network when `bwrap` and `socat` are installed (the forge warns at
-  startup if not); work on repos you trust; review the blueprint before approving.
+  their worktree and blocks network; once `bwrap` and `socat` are installed the forge *requires* it
+  (writes outside the worktree fail with "Read-only file system"; it warns at startup if missing).
+  Also: work on repos you trust, review the blueprint before approving, and let Odin's gates and
+  review guard `main`.
 - **Agents are isolated** from your account's MCP connectors (mail, calendar, …) and from user
   and project Claude settings.
 - **Secrets stay out of the repo.** Push (VAPID) keys, the database and the engine live in

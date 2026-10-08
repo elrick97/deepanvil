@@ -8,4 +8,5 @@ export const CREW: Dwarf[] = [
   { id: 'helga', name: 'Helga', role: 'smith', model: 'sonnet' },
   { id: 'ossi', name: 'Ossi', role: 'smith', model: 'sonnet' },
   { id: 'pip', name: 'Pip', role: 'sprite', model: 'haiku' },
+  { id: 'odin', name: 'Odin', role: 'keeper', model: 'sonnet' },
 ];

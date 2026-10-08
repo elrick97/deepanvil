@@ -52,6 +52,41 @@ export class Store {
         cache_read_tokens INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS spend_at ON spend (at);
+      CREATE TABLE IF NOT EXISTS offerings (
+        id TEXT PRIMARY KEY,
+        quest_id TEXT NOT NULL,
+        task_id TEXT NOT NULL,
+        dwarf_id TEXT NOT NULL,
+        branch TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        state TEXT NOT NULL,
+        reason TEXT,
+        lines INTEGER DEFAULT 0,
+        head_sha TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS gate_runs (
+        offering_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        gate TEXT NOT NULL,
+        status TEXT NOT NULL,
+        duration_ms INTEGER,
+        output_tail TEXT,
+        at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS reviews (
+        offering_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        decision TEXT NOT NULL,
+        summary TEXT,
+        findings TEXT,
+        at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS repo_policy (
+        repo TEXT PRIMARY KEY,
+        json TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS push_subs (
         endpoint TEXT PRIMARY KEY,
         json TEXT NOT NULL,
@@ -133,6 +168,41 @@ export class Store {
 
   bumpCrew(dwarfId: string, field: 'tasks_done' | 'tasks_failed' | 'escalations' | 'bells'): void {
     this.db.prepare(`INSERT INTO crew (dwarf_id, ${field}) VALUES (?, 1) ON CONFLICT (dwarf_id) DO UPDATE SET ${field} = ${field} + 1`).run(dwarfId);
+  }
+
+  // ------------------------------------------------------------------ Odin
+
+  upsertOffering(o: { id: string; questId: string; taskId: string; dwarfId: string; branch: string; revision: number; state: string; reason?: string; lines?: number; headSha?: string }): void {
+    const now = Date.now();
+    this.db
+      .prepare(
+        `INSERT INTO offerings (id, quest_id, task_id, dwarf_id, branch, revision, state, reason, lines, head_sha, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET revision = excluded.revision, state = excluded.state, reason = excluded.reason,
+           lines = COALESCE(excluded.lines, lines), head_sha = COALESCE(excluded.head_sha, head_sha), updated_at = excluded.updated_at`,
+      )
+      .run(o.id, o.questId, o.taskId, o.dwarfId, o.branch, o.revision, o.state, o.reason ?? null, o.lines ?? null, o.headSha ?? null, now, now);
+  }
+
+  recordGate(offeringId: string, revision: number, gate: string, status: string, durationMs: number, outputTail: string): void {
+    this.db.prepare('INSERT INTO gate_runs (offering_id, revision, gate, status, duration_ms, output_tail, at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(offeringId, revision, gate, status, durationMs, outputTail.slice(-4000), Date.now());
+  }
+
+  recordReview(offeringId: string, revision: number, decision: string, summary: string, findings: unknown): void {
+    this.db.prepare('INSERT INTO reviews (offering_id, revision, decision, summary, findings, at) VALUES (?, ?, ?, ?, ?, ?)').run(offeringId, revision, decision, summary, JSON.stringify(findings), Date.now());
+  }
+
+  /** Offerings left mid-review by a restart can't resume: their worktrees were cleared. */
+  abandonOpenOfferings(): void {
+    this.db.prepare("UPDATE offerings SET state = 'abandoned', reason = 'forge restarted', updated_at = ? WHERE state NOT IN ('merged', 'abandoned')").run(Date.now());
+  }
+
+  policy(repo: string): string | undefined {
+    return (this.db.prepare('SELECT json FROM repo_policy WHERE repo = ?').get(repo) as { json: string } | undefined)?.json;
+  }
+
+  setPolicy(repo: string, json: string): void {
+    this.db.prepare('INSERT INTO repo_policy (repo, json) VALUES (?, ?) ON CONFLICT (repo) DO UPDATE SET json = excluded.json').run(repo, json);
   }
 
   // ------------------------------------------------------------------ push

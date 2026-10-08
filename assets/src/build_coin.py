@@ -148,4 +148,5 @@ def main():
     print('[coin] wrote coin.glb, coin.png and app icons')
 
 
-main()
+if __name__ == '__main__':  # importable (strip_png_metadata) without rebuilding the coin
+    main()

@@ -3,7 +3,7 @@
 
 export type Model = 'opus' | 'sonnet' | 'haiku';
 
-export type Role = 'forgemaster' | 'smith' | 'sprite';
+export type Role = 'forgemaster' | 'smith' | 'sprite' | 'keeper';
 
 export interface Dwarf {
   id: string;
@@ -35,8 +35,29 @@ export type ForgeEvent =
   | { type: 'ledger'; byModel: Partial<Record<Model, ModelTotals>>; totalUsd: number; since: number }
   | { type: 'history'; quests: QuestSummary[] }
   | { type: 'push.config'; publicKey: string }
+  // --- Odin, keeper of the Vault of Main (docs/ODIN.md)
+  | { type: 'offering.opened'; offeringId: string; questId: string; taskId: string; dwarfId: string; title: string; revision: number; lines: number }
+  | { type: 'offering.state'; offeringId: string; state: OfferingState; reason?: string }
+  | { type: 'offering.gate'; offeringId: string; gate: GateName; status: GateStatus; summary?: string }
+  | { type: 'offering.review'; offeringId: string; decision: 'approve' | 'changes_requested'; summary: string; findings: Finding[] }
+  | { type: 'offering.merged'; offeringId: string; sha: string }
+  | { type: 'offering.diff'; offeringId: string; diff: string }
+  | { type: 'vault.health'; status: 'green' | 'red' | 'unknown'; sha: string; failing?: GateName[] }
+  | { type: 'odin.say'; text: string }
   | { type: 'forge.status'; mode: 'mock' | 'live'; repo: string; smiths: number; busy: boolean }
   | { type: 'forge.error'; message: string };
+
+export type OfferingState = 'queued' | 'rebasing' | 'gates' | 'reviewing' | 'awaiting_you' | 'merged' | 'sent_back' | 'abandoned';
+export type GateName = 'tests' | 'types' | 'lint';
+export type GateStatus = 'running' | 'pass' | 'fail' | 'flaky' | 'skipped';
+
+/** One review finding; only blocker/major send work back. */
+export interface Finding {
+  file: string;
+  line?: number;
+  severity: 'blocker' | 'major' | 'minor' | 'nit';
+  note: string;
+}
 
 /** Subscription usage window as reported by the engine (0..1 utilisation, unix seconds). */
 export interface LimitWindow {
@@ -70,6 +91,9 @@ export type ClientCommand =
   | { type: 'blueprint.reject'; questId: string }
   | { type: 'quest.abort' }
   | { type: 'permission.answer'; requestId: string; approved: boolean }
+  | { type: 'offering.merge'; offeringId: string }
+  | { type: 'offering.send_back'; offeringId: string; note?: string }
+  | { type: 'offering.diff'; offeringId: string }
   | { type: 'push.subscribe'; subscription: { endpoint: string; keys: { p256dh: string; auth: string } } };
 
 export type ForgeEventType = ForgeEvent['type'];

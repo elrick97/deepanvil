@@ -170,6 +170,7 @@ html, body {
 }
 .chip.working { border-color: var(--ember); background: rgba(255, 154, 60, 0.18); }
 .chip.done { border-color: var(--moss); background: rgba(143, 201, 138, 0.2); }
+.chip.offered { border-color: #9fd8ff; background: rgba(159, 216, 255, 0.16); }
 .chip.stuck { border-color: var(--blood); background: rgba(224, 96, 74, 0.2); }
 
 /* --- Sound toggle ----------------------------------------------------------- */
@@ -239,3 +240,35 @@ html, body {
 .coin-ico { width: 1.25em; height: 1.25em; vertical-align: -0.28em; margin-right: 0.18em; filter: drop-shadow(0 0 4px rgba(255, 176, 32, 0.45)); }
 .coin-amt { white-space: nowrap; }
 .gauge .tier { opacity: 0.8; margin-left: 6px; }
+
+/* --- Odin: offering cards and the diff viewer ------------------------------ */
+#offerings { display: contents; }
+.offering { order: 0; pointer-events: auto; display: flex; flex-direction: column; gap: 6px; border-color: #9fd8ff; }
+.offering-head { font-family: 'Cinzel', serif; font-size: 14px; }
+.offering-meta, .offering-finding { font-size: 12px; opacity: 0.85; overflow-wrap: anywhere; }
+.offering-summary { font-size: 13px; overflow-wrap: anywhere; }
+.offering-gates { display: flex; gap: 6px; flex-wrap: wrap; }
+.offering-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.chip.gate-pass { border-color: var(--moss); }
+.chip.gate-fail { border-color: var(--blood); }
+.chip.gate-flaky { border-color: var(--ember); }
+.chip.gate-running { border-color: #9fd8ff; }
+.diff-modal {
+  position: fixed;
+  inset: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: #1c1410;
+  border: 1px solid rgba(246, 231, 200, 0.25);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.diff-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 8px 10px; font-weight: 700; border-bottom: 1px solid rgba(246, 231, 200, 0.15); }
+.diff-body { margin: 0; padding: 8px 0; overflow: auto; flex: 1; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #e8dcc6; }
+.diff-body div { padding: 0 10px; white-space: pre; }
+.diff-body .d-add { background: rgba(80, 160, 90, 0.22); color: #c9f2c4; }
+.diff-body .d-del { background: rgba(190, 70, 60, 0.22); color: #ffc9c0; }
+.diff-body .d-hunk { color: #9fd8ff; }
+.diff-body .d-file { color: #ffcf7a; font-weight: 700; }
+.gauge.vault-red { border-color: var(--blood); color: #ffc0b4; }

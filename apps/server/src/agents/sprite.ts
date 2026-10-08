@@ -41,12 +41,3 @@ export async function banter(name: string, situation: string, emit: Emit, ledger
   );
   return line.replace(/^["“]|["”]$/g, '').slice(0, 90);
 }
-
-/** A one-line summary of a diff for the Forgemaster's review. */
-export async function summarizeDiff(diff: string, emit: Emit, ledger: Ledger): Promise<string> {
-  return ask(
-    `Summarize this git diff for a code reviewer in <= 8 bullet points: what changed, where, and anything risky.\n<diff>\n${diff.slice(0, 120_000)}\n</diff>`,
-    emit,
-    ledger,
-  );
-}

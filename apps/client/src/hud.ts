@@ -16,6 +16,8 @@ export class Hud {
   private mode = '';
   private limits?: { fiveHour?: LimitWindow; sevenDay?: LimitWindow };
   private spend?: { byModel: Partial<Record<Model, ModelTotals>>; totalUsd: number };
+  private vault?: { status: 'green' | 'red' | 'unknown'; failing?: string[] };
+  private offerings = new Map<string, string>(); // offeringId -> title
 
   constructor(root: HTMLElement) {
     root.innerHTML = `
@@ -51,6 +53,7 @@ export class Hud {
     if (e.type === 'forge.status') this.mode = e.mode === 'live' ? `⚒ live · ${e.repo.split('/').pop()} · ${e.smiths} smiths` : '🎭 simulator';
     else if (e.type === 'limits') this.limits = { fiveHour: e.fiveHour, sevenDay: e.sevenDay };
     else if (e.type === 'ledger') this.spend = { byModel: e.byModel, totalUsd: e.totalUsd };
+    else if (e.type === 'vault.health') this.vault = { status: e.status, failing: e.failing };
     else return;
     this.renderGauges();
   }
@@ -66,6 +69,9 @@ export class Hud {
       const reset = h >= 24 ? `${Math.round(h / 24)}d` : h > 0 ? `${h}h` : `${Math.ceil(left / 60_000)}m`;
       chips.push({ text: `${label} ${pct}% · resets ${reset}`, cls: pct >= 90 ? 'hot' : pct >= 75 ? 'warn' : undefined });
     };
+    if (this.vault && this.vault.status !== 'unknown') {
+      chips.push(this.vault.status === 'green' ? { text: '🛡 main green' } : { text: `🛡 main red: ${(this.vault.failing ?? []).join(', ')}`, cls: 'vault-red' });
+    }
     win('5h', this.limits?.fiveHour);
     win('7d', this.limits?.sevenDay);
     if (this.spend) {
@@ -113,7 +119,25 @@ export class Hud {
   log(event: ForgeEvent, names: Map<string, string>): void {
     // Event text will come from real agents (file names, commands): never treat it as HTML.
     const line = document.createElement('div');
-    if (event.type === 'usage.tick') {
+    if (event.type === 'offering.opened') this.offerings.set(event.offeringId, event.title);
+    const offering = (id: string) => `“${this.offerings.get(id) ?? id}”`;
+    const odinLine = (): string | null => {
+      switch (event.type) {
+        case 'offering.opened': return event.lines ? `⚖ ${names.get(event.dwarfId) ?? event.dwarfId} offers ${offering(event.offeringId)} (rev ${event.revision}, ${event.lines} lines)` : null;
+        case 'offering.gate': return event.status === 'fail' || event.status === 'flaky' ? `Odin: ${event.gate} ${event.status === 'fail' ? '✗' : '~ flaky'} on ${offering(event.offeringId)}` : null;
+        case 'offering.review': return `Odin ${event.decision === 'approve' ? 'approves' : 'asks for changes'}: ${event.summary}`;
+        case 'offering.state': return event.state === 'sent_back' ? `Odin sends ${offering(event.offeringId)} back (${event.reason})` : event.state === 'awaiting_you' ? `⚖ ${offering(event.offeringId)} awaits your verdict` : null;
+        case 'offering.merged': return `✦ ${offering(event.offeringId)} enters the vault`;
+        case 'vault.health': return event.status === 'red' ? `🛡 main is red: ${(event.failing ?? []).join(', ')}` : null;
+        case 'odin.say': return `Odin: ${event.text}`;
+        default: return undefined as unknown as null;
+      }
+    };
+    const odin = odinLine();
+    if (odin === null) return;
+    if (odin !== undefined) {
+      line.textContent = odin;
+    } else if (event.type === 'usage.tick') {
       line.append(`${names.get(event.dwarfId) ?? event.dwarfId} spends `, coinAmount(event.costUsd), ` · ${fmt(event.inputTokens + event.outputTokens)} tokens (${event.model})`);
     } else {
       const text = describe(event, names);

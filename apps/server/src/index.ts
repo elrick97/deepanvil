@@ -25,11 +25,12 @@ const clients = new Set<WebSocket>();
 const STATEFUL = new Set<ForgeEvent['type']>([
   'blueprint.proposed', 'blueprint.approved', 'task.assigned', 'task.done', 'escalation',
   'permission.request', 'permission.resolved', 'merge',
+  'offering.opened', 'offering.state', 'offering.gate', 'offering.review', 'offering.merged',
 ]);
 let questLog: string[] = [];
 // Latest gauges, so a phone that connects later sees the treasury and limits at once.
 const latest = new Map<string, string>();
-const GAUGES = new Set<ForgeEvent['type']>(['limits', 'ledger', 'forge.status', 'history']);
+const GAUGES = new Set<ForgeEvent['type']>(['limits', 'ledger', 'forge.status', 'history', 'vault.health']);
 
 function envelope(event: ForgeEvent): string {
   const env: Envelope = { seq: ++seq, at: Date.now(), event };
@@ -114,7 +115,8 @@ wss.on('connection', (ws) => {
   ws.on('close', () => clients.delete(ws));
 });
 
-const forge = store ? new Forge(broadcast, { repo: REPO, smiths: SMITHS }, store) : undefined;
+const SANDBOX_REPO = join(homedir(), 'deepanvil', 'forge', 'sandbox');
+const forge = store ? new Forge(broadcast, { repo: REPO, smiths: SMITHS, defaultMode: REPO === SANDBOX_REPO ? 'auto' : 'approve' }, store) : undefined;
 
 http.listen(PORT, () => {
   console.log(`[deepanvil] forge listening on :${PORT} (${process.platform}, node ${process.version})`);

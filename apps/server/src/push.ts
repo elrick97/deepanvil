@@ -58,6 +58,12 @@ export class Pusher {
         return this.send({ title: 'Thráin’s blueprint is ready', body: `${e.title} — ${e.tasks.length} task(s). Light the forges?`, tag: e.questId });
       case 'merge':
         return this.send({ title: 'Into the minecart!', body: `Quest merged (${e.branch}).`, tag: e.questId });
+      case 'offering.state':
+        if (e.state !== 'awaiting_you') return;
+        return this.send({ title: '⚖ Odin awaits your verdict', body: `An offering passed every gate${e.reason ? ` (${e.reason})` : ''}. Merge it?`, tag: e.offeringId });
+      case 'vault.health':
+        if (e.status !== 'red') return;
+        return this.send({ title: 'The Vault of Main is cracked', body: `${(e.failing ?? []).join(' and ')} fail on main.`, tag: 'vault-health' });
       case 'forge.error':
         return this.send({ title: 'Trouble at the forge', body: e.message, tag: 'forge-error' });
     }

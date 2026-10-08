@@ -2,7 +2,7 @@ import type { ForgeEvent } from '@deepanvil/shared';
 
 // Bottom banner: the current quest, its phase, and one chip per blueprint task.
 
-type TaskState = 'waiting' | 'working' | 'done' | 'stuck';
+type TaskState = 'waiting' | 'working' | 'offered' | 'done' | 'stuck';
 
 interface Task {
   id: string;
@@ -58,6 +58,17 @@ export class QuestBanner {
         if (t?.state === 'stuck') t.state = 'working';
         break;
       }
+      case 'offering.opened': {
+        const t = task(e.taskId);
+        if (t && t.state !== 'done') t.state = 'offered';
+        break;
+      }
+      case 'offering.state': {
+        if (e.state !== 'sent_back') return;
+        const t = this.tasks.find((x) => e.offeringId.endsWith(`-${x.id}`));
+        if (t) t.state = 'working';
+        break;
+      }
       case 'task.done': {
         const t = task(e.taskId);
         if (t) t.state = 'done';
@@ -75,7 +86,7 @@ export class QuestBanner {
 
   private render(): void {
     const esc = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
-    const icon: Record<TaskState, string> = { waiting: '○', working: '⚒', done: '✦', stuck: '!' };
+    const icon: Record<TaskState, string> = { waiting: '○', working: '⚒', offered: '⚖', done: '✦', stuck: '!' };
     this.el.classList.remove('hidden');
     this.el.innerHTML = `
       <div class="quest-phase">${esc(PHASE[this.phase] ?? '')}</div>
