@@ -92,6 +92,12 @@ export function runGate(command: string, cwd: string, timeoutSec: number, signal
       kill();
     }, timeoutSec * 1000);
     signal?.addEventListener('abort', kill, { once: true });
+    // A gate that cannot start (its folder vanished, no bash) is a failed gate, not a crash of the forge.
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', kill);
+      resolve({ ok: false, output: `could not start the gate: ${err.message}`, durationMs: Date.now() - started, timedOut: false });
+    });
     child.on('close', (code) => {
       clearTimeout(timer);
       signal?.removeEventListener('abort', kill);

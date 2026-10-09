@@ -12,6 +12,7 @@ import type { BlueprintTask, PlanInput, RescopeInput, TriageInput } from './forg
 import type { Policy } from './gates.ts';
 import type { Verdict } from './odin-review.ts';
 import { Forge, type Agents } from './orchestrator.ts';
+import { runGate } from './gates.ts';
 import { judge } from './permissions.ts';
 import { Ledger, waitForRest } from './run.ts';
 import type { SmithOutcome, SmithRun } from './smith.ts';
@@ -321,6 +322,8 @@ async function restingChecks() {
 
 async function main() {
   permissionTable();
+  const lost = await runGate('true', join(root, 'a-folder-that-is-gone'), 5);
+  check('a gate that cannot start fails instead of crashing the forge', !lost.ok && lost.output.includes('could not start'), lost.output);
   await restingChecks();
   await forge.recover();
   await waitFor((e) => e.type === 'vault.health');
