@@ -96,6 +96,7 @@ export class Controls {
         this.draft.hidden = false;
         break;
       case 'blueprint.approved':
+      case 'blueprint.rejected':
         this.pendingQuest = undefined;
         this.draft.hidden = true;
         break;

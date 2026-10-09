@@ -39,6 +39,11 @@ export class QuestBanner {
         this.phase = 'drafting';
         this.tasks = e.tasks.map((t) => ({ ...t, state: 'waiting' }));
         break;
+      case 'blueprint.rejected':
+        clearTimeout(this.hideTimer);
+        this.tasks = [];
+        this.el.classList.add('hidden');
+        return;
       case 'blueprint.approved':
         this.phase = 'forging';
         break;

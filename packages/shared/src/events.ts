@@ -51,6 +51,8 @@ export type ForgeEvent =
   /** The questions were answered (or the quest ended): every open form closes. */
   | { type: 'plan.answered'; questId: string }
   | { type: 'blueprint.proposed'; questId: string; title: string; tasks: { id: string; title: string }[] }
+  /** You sent the blueprint back: every screen drops its draft card and banner. */
+  | { type: 'blueprint.rejected'; questId: string }
   | { type: 'blueprint.approved'; questId: string }
   | { type: 'task.assigned'; questId: string; taskId: string; dwarfId: string; title: string }
   | { type: 'task.done'; questId: string; taskId: string; dwarfId: string }

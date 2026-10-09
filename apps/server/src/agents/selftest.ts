@@ -358,6 +358,7 @@ async function main() {
   check('answers reach the planner with his own notes', second?.qa[0]?.answer.picks.join() === 'A' && second.qa[0].answer.other === 'and log it' && second.notes === 'repo notes' && second.round === 2);
   check('only real option labels count as picks', second?.qa[0]?.answer.picks.length === 1);
   rejectDraft(bp.questId);
+  check('rejecting a blueprint tells every screen', (await nextEvent('blueprint.rejected', from)).questId === bp.questId);
 
   askMode = 'always';
   planCalls.length = 0;

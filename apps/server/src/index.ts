@@ -52,6 +52,8 @@ export function broadcast(event: ForgeEvent): void {
   const msg = envelope(event);
   if (event.type === 'plan.questions') openQuestions = msg;
   if (event.type === 'plan.answered' || event.type === 'blueprint.proposed' || (event.type === 'forge.status' && !event.busy)) openQuestions = undefined;
+  // A rejected blueprint must not be replayed to the next client that connects.
+  if (event.type === 'blueprint.rejected') questLog = [];
   if (event.type === 'blueprint.proposed') {
     questLog = [];
     transcripts.clear();

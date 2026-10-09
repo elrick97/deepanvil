@@ -152,6 +152,7 @@ export class Forge {
           this.store.setQuestStatus(cmd.questId, 'rejected');
           this.history();
           this.pending = undefined;
+          this.emit({ type: 'blueprint.rejected', questId: cmd.questId });
           this.setBusy(false);
           this.say('Back to the drawing board, then. Tell me what to change.');
         }
