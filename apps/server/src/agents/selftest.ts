@@ -44,7 +44,7 @@ const flakyMark = join(root, 'flaky-mark');
 const policy: Policy = {
   mode: 'auto',
   gates: {
-    tests: `! test -e FAIL && ! grep -rqs BROKEN --include=*.txt . && { if [ -f flaky.txt ] && [ ! -f ${flakyMark} ]; then touch ${flakyMark}; exit 1; fi; true; }`,
+    tests: `if test -e FAIL; then echo 'FAIL marker present: main is red'; exit 1; fi; ! grep -rqs BROKEN --include=*.txt . && { if [ -f flaky.txt ] && [ ! -f ${flakyMark} ]; then touch ${flakyMark}; exit 1; fi; true; }`,
     lint: '! grep -rqs lint-error --include=*.txt .',
   },
   gateTimeoutSec: 30,
@@ -377,6 +377,17 @@ async function main() {
   evs = await quest([task('unrelated')]);
   check('red main: health check reports it', evs.some((e) => e.type === 'vault.health' && e.status === 'red'));
   check('red main: unrelated work cannot enter', merged(evs).length === 0 && !onMain('unrelated.txt'));
+
+  // The vault panel: Odin's rules and how recent offerings fared (gate output, his review).
+  const vaultAt = events.length;
+  forge.handle({ type: 'vault.open' });
+  const vault = (await waitFor((e) => e.type === 'vault.info' && events.indexOf(e) >= vaultAt)) as Extract<ForgeEvent, { type: 'vault.info' }>;
+  const refused = vault.info.recent.find((o) => o.taskId === 'unrelated');
+  const entered = vault.info.recent.find((o) => o.taskId === 'gatefix');
+  check('vault panel: Odin\'s policy', vault.info.policy.mode === policy.mode && vault.info.policy.maxDiffLines === policy.maxDiffLines && Object.keys(vault.info.policy.gates).length > 0 && vault.info.repo.length > 0 && !vault.info.repo.includes('/'));
+  check('vault panel: a refused offering shows its failing gate and output', refused?.state === 'sent_back' && refused.gates.some((g) => g.status === 'fail' && g.tail.length > 0), JSON.stringify(refused?.gates));
+  check('vault panel: a merged offering shows its passing gates and Odin\'s review', entered?.state === 'merged' && entered.revision === 2 && entered.gates.length > 0 && entered.gates.every((g) => g.status === 'pass') && entered.review?.decision === 'approve', JSON.stringify(entered?.review));
+  check('vault panel: newest offering first', vault.info.recent.every((o, i, all) => i === 0 || all[i - 1]!.at >= o.at));
   check('two failures escalate to Thráin, the third gives up', replans === replansBefore + 1 && evs.some((e) => e.type === 'escalation'));
   evs = await quest([task('mend')]);
   check('mending main enters and turns the vault green', merged(evs).join() === 'mend' && evs.some((e) => e.type === 'vault.health' && e.status === 'green'));

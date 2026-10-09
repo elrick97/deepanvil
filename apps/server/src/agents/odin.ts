@@ -65,6 +65,11 @@ export class Odin {
   private abort = new AbortController();
   health: 'green' | 'red' | 'unknown' = 'unknown';
 
+  /** Odin's rules for this repo, as shown in the vault panel. */
+  get policy(): Policy {
+    return this.d.policy;
+  }
+
   constructor(deps: OdinDeps) {
     this.d = deps;
     this.scratch = join(worktreesDir(deps.repo), 'odin');

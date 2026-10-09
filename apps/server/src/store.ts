@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { Model, ModelTotals, QuestDetail, QuestSummary } from '@deepanvil/shared';
+import type { Finding, GateName, GateStatus, Model, ModelTotals, OfferingState, QuestDetail, QuestSummary, VaultInfo } from '@deepanvil/shared';
 
 // The forge's memory (Node's built-in SQLite: no native modules, so it runs fine from the
 // node_modules shared with Windows). Lives in WSL at ~/.deepanvil/forge.db.
@@ -186,6 +186,48 @@ export class Store {
       };
     });
     return { id: q.id, title: q.title ?? q.request.slice(0, 60), request: q.request.slice(0, 2000), status: q.status, createdAt: q.created_at, ...(q.finished_at ? { finishedAt: q.finished_at } : {}), spend, tasks, offerings };
+  }
+
+  /** The latest offerings with their current revision's gates (output tails) and Odin's review, for the vault panel. */
+  recentOfferings(limit = 12): VaultInfo['recent'] {
+    const rows = this.db
+      .prepare(
+        `SELECT o.id, o.task_id, o.dwarf_id, o.revision, o.state, o.reason, o.lines, o.updated_at, COALESCE(t.title, o.task_id) AS title
+         FROM offerings o LEFT JOIN tasks t ON t.quest_id = o.quest_id AND t.id = o.task_id
+         ORDER BY o.updated_at DESC LIMIT ?`,
+      )
+      .all(limit) as { id: string; task_id: string; dwarf_id: string; revision: number; state: string; reason: string | null; lines: number; updated_at: number; title: string }[];
+    return rows.map((o) => {
+      // A flaky retry records a gate twice: the last run is the one that counts.
+      const latest = new Map<string, { gate: GateName; status: GateStatus; ms: number; tail: string }>();
+      for (const g of this.db.prepare('SELECT gate, status, duration_ms, output_tail FROM gate_runs WHERE offering_id = ? AND revision = ? ORDER BY at').all(o.id, o.revision) as {
+        gate: string; status: string; duration_ms: number | null; output_tail: string | null;
+      }[]) {
+        latest.set(g.gate, { gate: g.gate as GateName, status: g.status as GateStatus, ms: g.duration_ms ?? 0, tail: (g.output_tail ?? '').slice(-1500) });
+      }
+      const rev = this.db.prepare('SELECT decision, summary, findings FROM reviews WHERE offering_id = ? AND revision = ? ORDER BY at DESC LIMIT 1').get(o.id, o.revision) as
+        | { decision: string; summary: string | null; findings: string | null }
+        | undefined;
+      let findings: Finding[] = [];
+      try {
+        findings = (JSON.parse(rev?.findings ?? '[]') as Finding[]).slice(0, 6).map((f) => ({ ...f, file: String(f.file).slice(0, 200), note: String(f.note).slice(0, 300) }));
+      } catch {
+        /* an unreadable findings blob is just no findings */
+      }
+      return {
+        id: o.id,
+        taskId: o.task_id,
+        title: o.title,
+        dwarfId: o.dwarf_id,
+        revision: o.revision,
+        state: o.state as OfferingState,
+        ...(o.reason ? { reason: o.reason } : {}),
+        lines: o.lines,
+        at: o.updated_at,
+        gates: [...latest.values()],
+        ...(rev ? { review: { decision: rev.decision, summary: (rev.summary ?? '').slice(0, 500), findings } } : {}),
+      };
+    });
   }
 
   // ------------------------------------------------------------------ tasks & crew

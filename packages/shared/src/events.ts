@@ -107,6 +107,7 @@ export type ForgeEvent =
   | { type: 'ledger'; byModel: Partial<Record<Model, ModelTotals>>; totalUsd: number; since: number }
   | { type: 'history'; quests: QuestSummary[] }
   | { type: 'quest.detail'; detail: QuestDetail }
+  | { type: 'vault.info'; info: VaultInfo }
   | { type: 'push.config'; publicKey: string }
   // --- Odin, keeper of the Vault of Main (docs/ODIN.md)
   | { type: 'offering.opened'; offeringId: string; questId: string; taskId: string; dwarfId: string; title: string; revision: number; lines: number }
@@ -152,6 +153,35 @@ export interface QuestDetail {
   offerings: { taskId: string; revision: number; state: string; reason?: string; lines: number; review?: { decision: string; summary: string } }[];
 }
 
+/** The Vault of Main as the vault panel shows it: Odin's rules, and how recent offerings fared. */
+export interface VaultInfo {
+  /** The repo's folder name. */
+  repo: string;
+  policy: {
+    mode: 'auto' | 'approve';
+    /** Gate name to shell command. */
+    gates: Partial<Record<GateName, string>>;
+    maxDiffLines: number;
+    gateTimeoutSec: number;
+    flakyRetries: number;
+    protectedPaths: string[];
+  };
+  /** Newest first. */
+  recent: {
+    id: string;
+    taskId: string;
+    title: string;
+    dwarfId: string;
+    revision: number;
+    state: OfferingState;
+    reason?: string;
+    lines: number;
+    at: number;
+    gates: { gate: GateName; status: GateStatus; ms: number; tail: string }[];
+    review?: { decision: string; summary: string; findings: Finding[] };
+  }[];
+}
+
 /** One line of the quest log (newest first). */
 export interface QuestSummary {
   id: string;
@@ -190,6 +220,8 @@ export type ClientCommand =
   | { type: 'quest.abort' }
   /** Open a past quest in the history panel. */
   | { type: 'history.open'; questId: string }
+  /** Open the vault panel: Odin's policy and the latest offerings. */
+  | { type: 'vault.open' }
   | { type: 'permission.answer'; requestId: string; approved: boolean }
   | { type: 'offering.merge'; offeringId: string }
   | { type: 'offering.send_back'; offeringId: string; note?: string }

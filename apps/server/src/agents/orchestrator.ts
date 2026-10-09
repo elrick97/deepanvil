@@ -208,6 +208,18 @@ export class Forge {
       case 'plan.change':
         this.changeWaits.get(cmd.changeId)?.(cmd.approve === true);
         break;
+      case 'vault.open': {
+        const p = this.odin.policy;
+        this.emit({
+          type: 'vault.info',
+          info: {
+            repo: this.cfg.repo.split('/').pop() ?? '',
+            policy: { mode: p.mode, gates: p.gates, maxDiffLines: p.maxDiffLines, gateTimeoutSec: p.gateTimeoutSec, flakyRetries: p.flakyRetries, protectedPaths: p.protectedPaths },
+            recent: this.store.recentOfferings(12),
+          },
+        });
+        break;
+      }
       case 'history.open': {
         const detail = this.store.questDetail(String(cmd.questId));
         if (detail) this.emit({ type: 'quest.detail', detail });
