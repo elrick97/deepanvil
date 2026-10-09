@@ -30,6 +30,7 @@ export class VaultPanel {
   private health: { status: 'green' | 'red' | 'unknown'; failing?: string[] } = { status: 'unknown' };
   private open = new Set<string>();
   private visible = false;
+  private repo?: string;
   private refresh?: ReturnType<typeof setTimeout>;
 
   constructor(root: HTMLElement, send: Send, names: Map<string, string>) {
@@ -45,6 +46,15 @@ export class VaultPanel {
         break;
       case 'vault.info':
         this.info = e.info;
+        break;
+      case 'forge.status':
+        // The forge turned to another project: what we show is stale.
+        if (this.repo !== undefined && this.repo !== e.repo) {
+          this.info = undefined;
+          this.open.clear();
+          if (this.visible) this.send({ type: 'vault.open' });
+        }
+        this.repo = e.repo;
         break;
       case 'offering.opened':
       case 'offering.state':

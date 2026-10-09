@@ -14,6 +14,7 @@ export class Hud {
   onSoundToggle?: (on: boolean) => void;
   onHistory?: () => void;
   onVault?: () => void;
+  onProjects?: () => void;
   private gauges: HTMLElement;
   private mode = '';
   private limits?: { fiveHour?: LimitWindow; sevenDay?: LimitWindow };
@@ -43,9 +44,11 @@ export class Hud {
     this.ticker.style.display = 'none';
     this.gauges = root.querySelector('[data-gauges]')!;
     this.soundBtn = root.querySelector('[data-sound]')!;
-    // The "main green/red" chip opens the vault panel.
+    // The project chip opens the picker, the "main green/red" chip the vault panel.
     this.gauges.addEventListener('click', (ev) => {
-      if ((ev.target as Element).closest('[data-action="vault"]')) this.onVault?.();
+      const action = (ev.target as Element).closest<HTMLElement>('[data-action]')?.dataset.action;
+      if (action === 'vault') this.onVault?.();
+      else if (action === 'projects') this.onProjects?.();
     });
     root.querySelector('[data-history]')!.addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -72,8 +75,8 @@ export class Hud {
   }
 
   renderGauges(): void {
-    const chips: { text: string | (Node | string)[]; cls?: string; action?: 'vault' }[] = [];
-    if (this.mode) chips.push({ text: this.mode });
+    const chips: { text: string | (Node | string)[]; cls?: string; action?: 'vault' | 'projects' }[] = [];
+    if (this.mode) chips.push({ text: this.mode, action: this.mode.startsWith('⚒') ? 'projects' : undefined });
     if (this.restUntil) {
       const mins = Math.max(1, Math.ceil((this.restUntil - Date.now()) / 60_000));
       chips.push({ text: `😴 resting · back in ${mins >= 90 ? `${Math.round(mins / 60)}h` : `${mins}m`}`, cls: 'warn' });
@@ -112,7 +115,7 @@ export class Hud {
           el.dataset.action = c.action;
           el.setAttribute('role', 'button');
           el.tabIndex = 0;
-          el.title = 'Open the Vault of Main';
+          el.title = c.action === 'projects' ? 'Projects: switch, add or clone' : 'Open the Vault of Main';
           el.addEventListener('keydown', (ev) => (ev.key === 'Enter' || ev.key === ' ') && (ev.preventDefault(), el.click()));
         }
         if (typeof c.text === 'string') el.textContent = c.text;
