@@ -103,7 +103,12 @@ export function startMockForge(emit: (e: ForgeEvent) => void): void {
     return run;
   };
 
+  // The smith's own to-do list (a chalkboard at the anvil), ticked off as the task goes.
+  const board = (d: Dwarf, done: number) =>
+    emit({ type: 'dwarf.todos', dwarfId: d.id, items: ['Read the context pack', 'Make the change', 'Run the tests', 'Commit'].map((text, i) => ({ text, status: i < done ? 'completed' : i === done ? 'in_progress' : 'pending' })) });
+
   async function runTask(questId: string, taskId: string, smith: Dwarf, title: string): Promise<void> {
+    board(smith, 0);
     // Scout: read the files named in the blueprint's context pack.
     for (let i = 0; i < 2 + Math.floor(rnd() * 3); i++) {
       tool(smith, taskId, rnd() < 0.7 ? 'read' : 'grep', pick(READS));
@@ -111,6 +116,7 @@ export function startMockForge(emit: (e: ForgeEvent) => void): void {
       await jitter(1400);
     }
     log(smith, 'say', 'I have the context I need; time to shape the code.');
+    board(smith, 1);
     if (rnd() < 0.3) emit({ type: 'banter', dwarfId: smith.id, line: pick(BANTER) });
 
     for (let attempt = 1; ; attempt++) {
@@ -126,6 +132,7 @@ export function startMockForge(emit: (e: ForgeEvent) => void): void {
         emit({ type: 'permission.resolved', dwarfId: smith.id, requestId, approved: rnd() < 0.85 });
         await jitter(1500);
       }
+      board(smith, 2);
       tool(smith, taskId, 'bash', 'npm test');
       await jitter(2600);
       log(smith, 'result', `Tests  ${2 + Math.floor(rnd() * 12)} passed${rnd() < 0.28 ? ', 1 failed' : ''}
@@ -145,6 +152,7 @@ Duration  ${(0.4 + rnd() * 2).toFixed(1)}s`);
         await jitter(9000);
       }
     }
+    board(smith, 3);
     // Offer it at the vault until Odin lets it in.
     for (let revision = 1; ; revision++) {
       await jitter(1200);

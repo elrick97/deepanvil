@@ -21,6 +21,12 @@ export interface LogEntry {
   text: string;
 }
 
+/** One line of an agent's own to-do list (its TodoWrite tool), shown on the anvil's chalkboard. */
+export interface TodoItem {
+  text: string;
+  status: 'pending' | 'in_progress' | 'completed';
+}
+
 export type ForgeEvent =
   | { type: 'hello'; serverTime: number; crew: Dwarf[] }
   | { type: 'blueprint.proposed'; questId: string; title: string; tasks: { id: string; title: string }[] }
@@ -29,6 +35,7 @@ export type ForgeEvent =
   | { type: 'task.done'; questId: string; taskId: string; dwarfId: string }
   | { type: 'tool'; dwarfId: string; taskId: string; kind: ToolKind; summary: string }
   | { type: 'dwarf.log'; dwarfId: string; entry: LogEntry }
+  | { type: 'dwarf.todos'; dwarfId: string; items: TodoItem[] }
   | { type: 'test.pass'; dwarfId: string; taskId: string }
   | { type: 'test.fail'; dwarfId: string; taskId: string; attempt: number }
   | { type: 'permission.request'; dwarfId: string; requestId: string; action: string }

@@ -1,5 +1,5 @@
 import { query, type Options, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { ForgeEvent, LogEntry, Model } from '@deepanvil/shared';
+import type { ForgeEvent, LogEntry, Model, TodoItem } from '@deepanvil/shared';
 import { startOfToday, type Store } from '../store.ts';
 import { ENGINE_PATH } from './engine.ts';
 
@@ -54,6 +54,16 @@ export function log(emit: Emit, dwarfId: string, kind: LogEntry['kind'], text: s
   emit({ type: 'dwarf.log', dwarfId, entry: { at: Date.now(), kind, text: text.length > LOG_MAX ? `${text.slice(0, LOG_MAX)}…` : text } });
 }
 
+/** The agent's to-do list from a TodoWrite call (untrusted shape: validate, clip, cap). */
+function todosOf(input: unknown): TodoItem[] {
+  const raw = (input as { todos?: unknown } | null)?.todos;
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 12).map((t: { content?: unknown; activeForm?: unknown; status?: unknown }) => ({
+    text: String(t?.content ?? t?.activeForm ?? '').slice(0, 120),
+    status: t?.status === 'completed' || t?.status === 'in_progress' ? t.status : 'pending',
+  }));
+}
+
 function describeTool(name: string, input: unknown, cwd?: string): string {
   const i = (input ?? {}) as Record<string, unknown>;
   const detail = String(i.command ?? i.file_path ?? i.pattern ?? i.path ?? i.url ?? '');
@@ -93,7 +103,10 @@ export async function runAgent(spec: RunSpec, emit: Emit, ledger: Ledger): Promi
       // The live transcript: what the agent says and which tools it calls (results come from hooks).
       for (const block of Array.isArray(m.content) ? m.content : []) {
         if (block.type === 'text' && block.text.trim()) log(emit, spec.dwarfId, 'say', block.text);
-        else if (block.type === 'tool_use') log(emit, spec.dwarfId, 'tool', describeTool(block.name, block.input, spec.options.cwd));
+        else if (block.type === 'tool_use') {
+          log(emit, spec.dwarfId, 'tool', describeTool(block.name, block.input, spec.options.cwd));
+          if (block.name === 'TodoWrite') emit({ type: 'dwarf.todos', dwarfId: spec.dwarfId, items: todosOf(block.input) });
+        }
       }
       // One API response can arrive as several messages; count its usage once.
       if (seen.has(m.id)) continue;

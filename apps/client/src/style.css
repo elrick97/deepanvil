@@ -315,10 +315,17 @@ html, body {
 
 /* --- Command slates: what each smith is doing right now ----------------------- */
 #slates { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
-.slate {
+.slate-stack {
   position: absolute;
   left: 0;
   top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  will-change: transform;
+}
+.slate {
   display: flex;
   gap: 6px;
   align-items: baseline;
@@ -332,9 +339,25 @@ html, body {
   box-shadow: 0 3px 10px rgba(30, 14, 4, 0.45);
   opacity: 0;
   transition: opacity 0.3s ease, border-color 0.3s ease, background 0.3s ease;
-  will-change: transform;
   white-space: nowrap;
 }
+.chalk {
+  min-width: 120px;
+  max-width: min(44vw, 260px);
+  padding: 4px 9px 5px;
+  border-radius: 5px;
+  background: #27382f;
+  border: 2px solid #8a6a43;
+  color: #e8efe2;
+  font: 500 10.5px/1.4 'Nunito', system-ui, sans-serif;
+  box-shadow: 0 3px 10px rgba(30, 14, 4, 0.4);
+  opacity: 0.92;
+}
+.chalk[hidden] { display: none; }
+.chalk-row { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chalk-in_progress { color: #ffe9a8; font-weight: 700; }
+.chalk-completed { opacity: 0.6; text-decoration: line-through; }
+.chalk-more { opacity: 0.6; font-style: italic; }
 .slate.in { opacity: 0.94; }
 .slate[data-state='pass'] { border-color: #7bc67e; background: #243a28; }
 .slate[data-state='fail'] { border-color: #e2674f; background: #422320; }

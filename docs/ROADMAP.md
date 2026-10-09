@@ -143,7 +143,8 @@ event contract.
 - ✓ O3: Odin and the Vault of Main in the hall.
 - ✓ Tap-a-dwarf card (task, current action, coins, follow camera) with a live transcript per dwarf: the agent's words, commands and output tails (`dwarf.log` events, replayed to late joiners).
 - ✓ Command slate in front of each anvil (what the smith runs now; green or red on test results).
-- Per-command animations, to-do chalkboards.
+- ✓ To-do chalkboard under each slate (the smith's own to-do list, `dwarf.todos` events, replayed to late joiners).
+- Per-command animations.
 - History panel and vault panel (tap the door).
 - Rate-limit "resting" state; push for every needs-you moment (blueprint ready, awaiting you, main red, quest done).
 - Pause rendering when the tab is hidden.

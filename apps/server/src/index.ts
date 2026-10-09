@@ -31,6 +31,8 @@ let questLog: string[] = [];
 // Each dwarf's recent transcript (agent speech, commands, output tails), replayed on connect.
 const TRANSCRIPT_KEEP = 80;
 const transcripts = new Map<string, string[]>();
+// Each dwarf's latest to-do list (a chalkboard), replayed on connect.
+const todos = new Map<string, string>();
 // Latest gauges, so a phone that connects later sees the treasury and limits at once.
 const latest = new Map<string, string>();
 const GAUGES = new Set<ForgeEvent['type']>(['limits', 'ledger', 'forge.status', 'history', 'vault.health']);
@@ -49,7 +51,10 @@ export function broadcast(event: ForgeEvent): void {
   if (event.type === 'blueprint.proposed') {
     questLog = [];
     transcripts.clear();
+    todos.clear();
   }
+  if (event.type === 'dwarf.todos') todos.set(event.dwarfId, msg);
+  if (event.type === 'task.done' || event.type === 'task.assigned') todos.delete(event.dwarfId);
   if (event.type === 'dwarf.log') {
     const list = transcripts.get(event.dwarfId) ?? [];
     list.push(msg);
@@ -114,6 +119,7 @@ wss.on('connection', (ws) => {
   if (pusher) ws.send(envelope({ type: 'push.config', publicKey: pusher.publicKey }));
   for (const msg of questLog) ws.send(msg);
   for (const list of transcripts.values()) for (const msg of list) ws.send(msg);
+  for (const msg of todos.values()) ws.send(msg);
   for (const msg of latest.values()) ws.send(msg);
   ws.on('message', (data) => {
     if (!forge) return;
