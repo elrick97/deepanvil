@@ -207,7 +207,7 @@ html, body {
 .btn[hidden] { display: none; }
 
 .composer { order: 4; display: flex; gap: 8px; pointer-events: auto; padding: 8px; }
-.composer[hidden], .draft-actions[hidden], .bell-card[hidden] { display: none; }
+.composer[hidden], .bell-card[hidden] { display: none; }
 .composer input {
   flex: 1;
   min-width: 0;
@@ -221,8 +221,6 @@ html, body {
 }
 .composer input:disabled { opacity: 0.6; }
 
-.draft-actions { order: 3; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; pointer-events: auto; }
-.draft-actions span { flex: 1; font-size: 13px; }
 
 .bell-card { order: 1; display: flex; flex-direction: column; gap: 6px; pointer-events: auto; border-color: var(--ember); }
 .bell-row { display: flex; gap: 8px; align-items: center; }
@@ -409,3 +407,51 @@ html, body {
   color: inherit;
 }
 .clarify-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* --- Thráin's blueprint card --------------------------------------------------- */
+#blueprint { display: contents; }
+#blueprint[hidden] { display: none; }
+.blueprint {
+  order: -1;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(66vh, calc(100vh - 220px));
+  border-color: var(--ember);
+}
+.bp-head { display: flex; flex-direction: column; gap: 2px; }
+.bp-label { font-size: 11px; opacity: 0.7; letter-spacing: 0.04em; }
+.bp-title { font-family: 'Cinzel', serif; font-size: 16px; overflow-wrap: anywhere; }
+.bp-summary { font-size: 12.5px; opacity: 0.9; overflow-wrap: anywhere; }
+.bp-tasks { overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+.bp-task { border: 1px solid rgba(246, 231, 200, 0.18); border-radius: 9px; padding: 5px 9px; background: rgba(0, 0, 0, 0.15); }
+.bp-task[open] { border-color: rgba(255, 154, 60, 0.5); }
+.bp-task-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; font-weight: 700; list-style: none; }
+.bp-task-head::-webkit-details-marker { display: none; }
+.bp-task-head::before { content: '▸'; opacity: 0.6; margin-right: 6px; }
+.bp-task[open] > .bp-task-head::before { content: '▾'; }
+.bp-task-title { flex: 1; overflow-wrap: anywhere; }
+.bp-drop { background: none; border: 0; color: inherit; opacity: 0.55; cursor: pointer; font-size: 14px; padding: 2px 6px; }
+.bp-drop:hover { opacity: 1; color: #ffb4a6; }
+.bp-line, .bp-files { font-size: 12px; margin-top: 5px; overflow-wrap: anywhere; }
+.bp-k { opacity: 0.6; display: inline-block; min-width: 44px; margin-right: 4px; }
+.bp-file { margin-left: 8px; }
+.bp-why { opacity: 0.7; }
+.bp-line code, .bp-file code { font: 600 11.5px ui-monospace, 'Cascadia Mono', Menlo, monospace; color: #ffd9a0; }
+.bp-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; align-items: center; }
+.bp-wait { font-size: 13px; opacity: 0.85; animation: bp-pulse 1.6s ease-in-out infinite; }
+@keyframes bp-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .bp-wait { animation: none; } }
+.bp-change { display: flex; gap: 8px; }
+.bp-change input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid rgba(246, 231, 200, 0.3);
+  background: rgba(0, 0, 0, 0.25);
+  color: inherit;
+}

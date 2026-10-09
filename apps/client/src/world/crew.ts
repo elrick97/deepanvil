@@ -319,12 +319,12 @@ export class Crew {
 
   handle(e: ForgeEvent): void {
     if (e.type === 'forge.rest') return this.setResting(e.resting);
-    if (e.type === 'plan.questions' && this.master) {
+    if ((e.type === 'plan.questions' || e.type === 'blueprint.revising') && this.master) {
       // He strokes his beard until you answer.
       this.play(this.master, 'scratch_beard', 600);
       return;
     }
-    if (e.type === 'plan.answered' && this.master) {
+    if ((e.type === 'plan.answered' || e.type === 'blueprint.revised') && this.master) {
       this.play(this.master, 'read', 6);
       return;
     }

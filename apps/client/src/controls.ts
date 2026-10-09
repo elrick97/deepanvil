@@ -14,12 +14,10 @@ interface Ask {
 export class Controls {
   private composer: HTMLFormElement;
   private input: HTMLInputElement;
-  private draft: HTMLElement;
   private bell: HTMLElement;
   private send: Send;
   private names: Map<string, string>;
   private asks: Ask[] = [];
-  private pendingQuest?: string;
   private live = false;
   private busy = false;
 
@@ -28,11 +26,6 @@ export class Controls {
     this.names = names;
     root.innerHTML = `
       <div class="bell-card hud-card" data-bell hidden></div>
-      <div class="draft-actions hud-card" data-draft hidden>
-        <span>Thráin's blueprint is ready.</span>
-        <button class="btn btn-primary" data-approve>🔥 Light the forges</button>
-        <button class="btn" data-reject>Redraw</button>
-      </div>
       <form class="composer hud-card" data-composer hidden>
         <input data-input type="text" enterkeyhint="send" autocomplete="off" maxlength="2000"
                placeholder="Ask Thráin for a quest…" aria-label="Quest for the Forgemaster" />
@@ -41,7 +34,6 @@ export class Controls {
       </form>`;
     this.composer = root.querySelector('[data-composer]')!;
     this.input = root.querySelector('[data-input]')!;
-    this.draft = root.querySelector('[data-draft]')!;
     this.bell = root.querySelector('[data-bell]')!;
 
     this.composer.addEventListener('submit', (ev) => {
@@ -57,21 +49,12 @@ export class Controls {
     root.querySelector('[data-stop]')!.addEventListener('click', () => {
       if (confirm('Stop the current quest? Smiths down tools; finished pieces stay merged.')) this.send({ type: 'quest.abort' });
     });
-    root.querySelector('[data-approve]')!.addEventListener('click', () => this.answerDraft(true));
-    root.querySelector('[data-reject]')!.addEventListener('click', () => this.answerDraft(false));
     this.bell.addEventListener('click', (ev) => {
       const btn = (ev.target as Element).closest<HTMLButtonElement>('button[data-req]');
       if (!btn) return;
       this.send({ type: 'permission.answer', requestId: btn.dataset.req!, approved: btn.dataset.ok === '1' });
       btn.closest('.bell-row')?.classList.add('answered');
     });
-  }
-
-  private answerDraft(approve: boolean): void {
-    if (!this.pendingQuest) return;
-    this.send({ type: approve ? 'blueprint.approve' : 'blueprint.reject', questId: this.pendingQuest });
-    this.pendingQuest = undefined;
-    this.draft.hidden = true;
   }
 
   private setBusy(busy: boolean): void {
@@ -89,16 +72,6 @@ export class Controls {
         this.live = e.mode === 'live';
         this.composer.hidden = !this.live;
         this.setBusy(e.busy && this.live);
-        break;
-      case 'blueprint.proposed':
-        if (!this.live) break;
-        this.pendingQuest = e.questId;
-        this.draft.hidden = false;
-        break;
-      case 'blueprint.approved':
-      case 'blueprint.rejected':
-        this.pendingQuest = undefined;
-        this.draft.hidden = true;
         break;
       case 'permission.request':
         if (!this.live) break;

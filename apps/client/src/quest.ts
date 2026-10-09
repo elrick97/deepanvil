@@ -34,10 +34,11 @@ export class QuestBanner {
     const task = (id: string) => this.tasks.find((t) => t.id === id);
     switch (e.type) {
       case 'blueprint.proposed':
+      case 'blueprint.revised':
         clearTimeout(this.hideTimer);
         this.title = e.title;
         this.phase = 'drafting';
-        this.tasks = e.tasks.map((t) => ({ ...t, state: 'waiting' }));
+        this.tasks = e.tasks.map((t) => ({ id: t.id, title: t.title, state: 'waiting' }));
         break;
       case 'blueprint.rejected':
         clearTimeout(this.hideTimer);

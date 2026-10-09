@@ -168,6 +168,7 @@ function describe(e: ForgeEvent, names: Map<string, string>): string | null {
     case 'test.pass': return `${n(e.dwarfId)} quenches — tests pass ✦`;
     case 'test.fail': return `${n(e.dwarfId)}'s ingot cracks ✗`;
     case 'blueprint.proposed': return `The Forgemaster drafts: ${e.title}`;
+    case 'blueprint.revised': return `Thráin redraws: ${e.title}`;
     case 'blueprint.approved': return 'The forges are lit!';
     case 'task.assigned': return `${n(e.dwarfId)} takes up “${e.title}”`;
     case 'task.done': return `${n(e.dwarfId)} finishes a piece`;
