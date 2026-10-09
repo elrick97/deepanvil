@@ -312,3 +312,33 @@ html, body {
   /* Phones: the card slides in above the dock so the hall stays visible behind it. */
   #card { top: auto; right: 50%; transform: translateX(50%); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 130px); max-height: 38vh; }
 }
+
+/* --- Command slates: what each smith is doing right now ----------------------- */
+#slates { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+.slate {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  max-width: min(44vw, 260px);
+  padding: 3px 9px;
+  border-radius: 6px 6px 9px 9px;
+  background: #2b2a2c;
+  border: 2px solid #8a6a43;
+  color: #f1ecdc;
+  font: 600 11px/1.3 ui-monospace, 'Cascadia Mono', Menlo, monospace;
+  box-shadow: 0 3px 10px rgba(30, 14, 4, 0.45);
+  opacity: 0;
+  transition: opacity 0.3s ease, border-color 0.3s ease, background 0.3s ease;
+  will-change: transform;
+  white-space: nowrap;
+}
+.slate.in { opacity: 0.94; }
+.slate[data-state='pass'] { border-color: #7bc67e; background: #243a28; }
+.slate[data-state='fail'] { border-color: #e2674f; background: #422320; }
+.slate-ico { opacity: 0.9; }
+.slate-text { overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 640px) { .slate { font-size: 10px; max-width: 40vw; } }
+@media (prefers-reduced-motion: reduce) { .slate { transition: none; } }

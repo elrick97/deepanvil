@@ -142,7 +142,8 @@ event contract.
 ### v0.2 — "Clear sight" (in progress)
 - ✓ O3: Odin and the Vault of Main in the hall.
 - ✓ Tap-a-dwarf card (task, current action, coins, follow camera) with a live transcript per dwarf: the agent's words, commands and output tails (`dwarf.log` events, replayed to late joiners).
-- Slate with the running command, per-command animations, to-do chalkboards.
+- ✓ Command slate in front of each anvil (what the smith runs now; green or red on test results).
+- Per-command animations, to-do chalkboards.
 - History panel and vault panel (tap the door).
 - Rate-limit "resting" state; push for every needs-you moment (blueprint ready, awaiting you, main red, quest done).
 - Pause rendering when the tab is hidden.

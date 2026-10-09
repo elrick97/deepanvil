@@ -9,6 +9,7 @@ import { coinsOf } from './coins.ts';
 import { Controls } from './controls.ts';
 import { Hud } from './hud.ts';
 import { DwarfCard } from './dwarfcard.ts';
+import { Slates } from './slates.ts';
 import { OfferingCards } from './offerings.ts';
 import { Alerts } from './push.ts';
 import { QuestBanner } from './quest.ts';
@@ -125,6 +126,7 @@ resize();
 
 // Tap a dwarf (or Odin): open their card. A tap is a press and release that barely moved,
 // so orbiting and pinching never open one. The nearest one within reach of the finger wins.
+const slates = new Slates(document.querySelector('#slates')!, camera, (id) => crew.slatePoint(id));
 const dwarfCard = new DwarfCard(document.querySelector('#card')!);
 let followId: string | undefined;
 const follow = new THREE.Vector3();
@@ -166,6 +168,7 @@ const dispatch = (e: ForgeEvent): void => {
   crew.handle(e);
   vault.handle(e);
   dwarfCard.handle(e);
+  slates.handle(e);
   questBanner.handle(e);
   forgeControls.handle(e);
   offeringCards.handle(e);
@@ -214,6 +217,7 @@ renderer.setAnimationLoop(() => {
   vault.update(t, dt);
   fx.update(t, dt);
   bubbles.update(t);
+  slates.update(t);
   audio.update(camera);
   pipeline.render();
   governor.tick(dt);

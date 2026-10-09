@@ -247,6 +247,11 @@ export class Crew {
     this.spotTaken.set(spot, m.dwarf.id);
   }
 
+  /** The floor point in front of a smith's anvil, where their command slate stands. */
+  slatePoint(id: string): THREE.Vector3 | undefined {
+    return this.members.get(id)?.anvilTop?.clone().setY(0.55);
+  }
+
   /** Who can be tapped, and where on screen-space to test: a point at chest height. */
   targets(): { id: string; point: THREE.Vector3 }[] {
     return [...this.members.values()].map((m) => ({ id: m.dwarf.id, point: m.root.position.clone().setY(m.root.position.y + 1.0 * m.scale) }))
