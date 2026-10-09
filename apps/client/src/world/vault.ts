@@ -253,6 +253,12 @@ export class Vault {
 
   // ------------------------------------------------------------------ Odin
 
+  /** The great door as a tap target (a generous reach: it is big), for the vault panel. */
+  doorTarget(): { id: string; point: THREE.Vector3; reach: number } | undefined {
+    const door = this.hall.anchors.get('vault_door');
+    return door ? { id: 'vault', point: door.position.clone(), reach: 120 } : undefined;
+  }
+
   /** Odin as a tap target (chest height), for the dwarf card. */
   target(): { id: string; point: THREE.Vector3 } | undefined {
     return this.odin ? { id: 'odin', point: this.odin.position.clone().setY(this.odin.position.y + 1.2) } : undefined;

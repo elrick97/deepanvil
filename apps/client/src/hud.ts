@@ -13,6 +13,7 @@ export class Hud {
   soundWanted?: boolean;
   onSoundToggle?: (on: boolean) => void;
   onHistory?: () => void;
+  onVault?: () => void;
   private gauges: HTMLElement;
   private mode = '';
   private limits?: { fiveHour?: LimitWindow; sevenDay?: LimitWindow };
@@ -42,6 +43,10 @@ export class Hud {
     this.ticker.style.display = 'none';
     this.gauges = root.querySelector('[data-gauges]')!;
     this.soundBtn = root.querySelector('[data-sound]')!;
+    // The "main green/red" chip opens the vault panel.
+    this.gauges.addEventListener('click', (ev) => {
+      if ((ev.target as Element).closest('[data-action="vault"]')) this.onVault?.();
+    });
     root.querySelector('[data-history]')!.addEventListener('click', (ev) => {
       ev.stopPropagation();
       this.onHistory?.();
@@ -67,7 +72,7 @@ export class Hud {
   }
 
   renderGauges(): void {
-    const chips: { text: string | (Node | string)[]; cls?: string }[] = [];
+    const chips: { text: string | (Node | string)[]; cls?: string; action?: 'vault' }[] = [];
     if (this.mode) chips.push({ text: this.mode });
     if (this.restUntil) {
       const mins = Math.max(1, Math.ceil((this.restUntil - Date.now()) / 60_000));
@@ -82,7 +87,7 @@ export class Hud {
       chips.push({ text: `${label} ${pct}% · resets ${reset}`, cls: pct >= 90 ? 'hot' : pct >= 75 ? 'warn' : undefined });
     };
     if (this.vault && this.vault.status !== 'unknown') {
-      chips.push(this.vault.status === 'green' ? { text: '🛡 main green' } : { text: `🛡 main red: ${(this.vault.failing ?? []).join(', ')}`, cls: 'vault-red' });
+      chips.push(this.vault.status === 'green' ? { text: '🛡 main green', action: 'vault' } : { text: `🛡 main red: ${(this.vault.failing ?? []).join(', ')}`, cls: 'vault-red', action: 'vault' });
     }
     win('5h', this.limits?.fiveHour);
     win('7d', this.limits?.sevenDay);
@@ -103,6 +108,13 @@ export class Hud {
       ...chips.map((c) => {
         const el = document.createElement('span');
         el.className = `gauge${c.cls ? ` ${c.cls}` : ''}`;
+        if (c.action) {
+          el.dataset.action = c.action;
+          el.setAttribute('role', 'button');
+          el.tabIndex = 0;
+          el.title = 'Open the Vault of Main';
+          el.addEventListener('keydown', (ev) => (ev.key === 'Enter' || ev.key === ' ') && (ev.preventDefault(), el.click()));
+        }
         if (typeof c.text === 'string') el.textContent = c.text;
         else el.append(...c.text);
         return el;

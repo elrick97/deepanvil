@@ -13,6 +13,7 @@ import { ChangeCard } from './change.ts';
 import { ClarifyForm } from './clarify.ts';
 import { DwarfCard } from './dwarfcard.ts';
 import { HistoryPanel } from './history.ts';
+import { VaultPanel } from './vaultpanel.ts';
 import { Slates } from './slates.ts';
 import { OfferingCards } from './offerings.ts';
 import { Alerts } from './push.ts';
@@ -153,13 +154,19 @@ controls.addEventListener('start', () => {
     const rect = canvas.getBoundingClientRect();
     const reach = isTouchDevice ? 48 : 34; // px
     let best: { id: string; d: number } | undefined;
-    for (const t of [...crew.targets(), vault.target()].filter((x): x is { id: string; point: THREE.Vector3 } => !!x)) {
+    const targets: { id: string; point: THREE.Vector3; reach?: number }[] = [...crew.targets(), vault.target(), vault.doorTarget()].filter((x): x is { id: string; point: THREE.Vector3; reach?: number } => !!x);
+    for (const t of targets) {
       v.copy(t.point).project(camera);
       if (v.z > 1) continue;
       const d = Math.hypot((v.x * 0.5 + 0.5) * rect.width + rect.left - ev.clientX, (-v.y * 0.5 + 0.5) * rect.height + rect.top - ev.clientY);
-      if (d < reach && (!best || d < best.d)) best = { id: t.id, d };
+      // The door is big, so it is hit from further away; a dwarf standing in front of it still wins by being nearer.
+      const slack = t.reach ?? reach;
+      if (d < slack && (!best || d / slack < best.d)) best = { id: t.id, d: d / slack };
     }
-    dwarfCard.open(best?.id);
+    if (best?.id === 'vault') {
+      dwarfCard.close();
+      vaultPanel.toggle();
+    } else dwarfCard.open(best?.id);
   });
 }
 
@@ -168,6 +175,8 @@ link.onStatus = (on) => hud.setLink(on);
 const forgeControls = new Controls(document.querySelector('#controls')!, (cmd) => link.send(cmd), crew.names);
 const historyPanel = new HistoryPanel(document.querySelector('#history')!, (cmd) => link.send(cmd), crew.names);
 hud.onHistory = () => historyPanel.toggle();
+const vaultPanel = new VaultPanel(document.querySelector('#vaultpanel')!, (cmd) => link.send(cmd), crew.names);
+hud.onVault = () => vaultPanel.toggle();
 const changeCard = new ChangeCard(document.querySelector('#change')!, (cmd) => link.send(cmd));
 const blueprintCard = new BlueprintCard(document.querySelector('#blueprint')!, (cmd) => link.send(cmd));
 const clarify = new ClarifyForm(document.querySelector('#clarify')!, (cmd) => link.send(cmd));
@@ -184,6 +193,7 @@ const dispatch = (e: ForgeEvent): void => {
   blueprintCard.handle(e);
   changeCard.handle(e);
   historyPanel.handle(e);
+  vaultPanel.handle(e);
   offeringCards.handle(e);
   alerts.handle(e);
   hud.gauge(e);

@@ -522,3 +522,54 @@ html, body {
   /* Phones: a bottom sheet over the dock, the hall still visible above it. */
   #history { top: auto; left: 50%; transform: translateX(-50%); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 70px); max-height: 60vh; }
 }
+
+/* --- The Vault of Main panel ------------------------------------------------------------ */
+.gauge[data-action] { cursor: pointer; }
+#vaultpanel {
+  position: fixed;
+  top: max(112px, calc(env(safe-area-inset-top) + 104px));
+  left: max(12px, env(safe-area-inset-left));
+  width: min(440px, calc(100vw - 24px));
+  max-height: min(74vh, calc(100vh - 150px));
+  z-index: 8;
+  display: flex;
+}
+#vaultpanel[hidden] { display: none; }
+.vaultp { pointer-events: auto; display: flex; flex-direction: column; gap: 8px; width: 100%; min-height: 0; border-color: #9fd8ff; }
+.vp-head { display: flex; justify-content: space-between; align-items: center; }
+.vp-title { font-family: 'Cinzel', serif; font-size: 17px; letter-spacing: 0.04em; }
+.vaultp .icon-btn { background: none; border: 0; color: inherit; font-size: 16px; cursor: pointer; opacity: 0.7; }
+.vp-body { overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.vp-health { align-self: flex-start; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 999px; border: 1px solid rgba(246, 231, 200, 0.25); }
+.vp-green { border-color: var(--moss); }
+.vp-red { border-color: var(--blood); color: #ffc0b4; }
+.vp-rules { display: flex; flex-direction: column; gap: 3px; padding: 7px 9px; border-radius: 10px; background: rgba(0, 0, 0, 0.16); font-size: 12px; }
+.vp-line { overflow-wrap: anywhere; }
+.vp-k { display: inline-block; min-width: 46px; opacity: 0.65; }
+.vp-line code, .vp-tail { font: 600 11.5px ui-monospace, 'Cascadia Mono', Menlo, monospace; color: #ffd9a0; }
+.vp-dim { opacity: 0.65; }
+.vp-sub { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; opacity: 0.6; margin-bottom: 3px; }
+.vp-recent { display: flex; flex-direction: column; gap: 5px; }
+.vp-empty { font-size: 12.5px; opacity: 0.7; }
+.vp-off { border: 1px solid rgba(246, 231, 200, 0.16); border-radius: 10px; background: rgba(0, 0, 0, 0.14); padding: 6px 9px; }
+.vp-off[open] { border-color: rgba(159, 216, 255, 0.5); }
+.vp-sum { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; list-style: none; }
+.vp-sum::-webkit-details-marker { display: none; }
+.vp-ico { width: 1.3em; text-align: center; flex: none; }
+.vp-s-merged .vp-ico { color: #8fe08f; }
+.vp-s-sent_back .vp-ico, .vp-s-abandoned .vp-ico { color: #ff9c8c; }
+.vp-s-awaiting_you .vp-ico { color: #ffd257; }
+.vp-words { display: flex; flex-direction: column; min-width: 0; }
+.vp-name { font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+.vp-meta { font-size: 11.5px; opacity: 0.72; }
+.vp-detail { display: flex; flex-direction: column; gap: 6px; margin-top: 7px; padding-top: 6px; border-top: 1px solid rgba(246, 231, 200, 0.12); font-size: 12px; }
+.vp-gates { display: flex; gap: 6px; flex-wrap: wrap; }
+.vp-tail { margin: 0; padding: 6px 8px; border-radius: 8px; background: rgba(0, 0, 0, 0.32); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9em; overflow-y: auto; }
+.vp-review { overflow-wrap: anywhere; }
+.vp-finding { opacity: 0.85; overflow-wrap: anywhere; font-size: 11.5px; padding-left: 8px; border-left: 2px solid rgba(246, 231, 200, 0.25); }
+.vp-sev-blocker, .vp-sev-major { border-left-color: var(--blood); }
+.vp-sev-minor, .vp-sev-nit { opacity: 0.7; }
+@media (max-width: 640px) {
+  /* Phones: a bottom sheet over the dock. */
+  #vaultpanel { top: auto; left: 50%; transform: translateX(-50%); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 70px); max-height: 62vh; }
+}
