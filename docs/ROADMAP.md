@@ -160,7 +160,7 @@ event contract.
 ### v0.4 — "Real repos"
 - ✓ Project picker (the project chip in the HUD): add a repository by its WSL path (validated) or clone an https:// URL, switch between projects while idle, forget one. Each project keeps its own history, vault, Odin and merge rules; Odin keeps whichever branch the repo has checked out (not just `main`), and only the sandbox defaults to auto-merge.
 - Dirty-repo handling, settings panel.
-- Project instructions and skills (CLAUDE.md / AGENTS.md) for Thráin and the smiths; per-repo custom gates. (Today `settingSources: []` makes agents ignore a repo's own instructions: the first thing real repos need.)
+- ✓ Project instructions: Thráin (plan, replan, triage, rescope), the smiths and Odin's review follow the repo's CLAUDE.md / AGENTS.md, read as plain data from the committed snapshot (with in-repo `@imports`; never through the engine's project settings, which would also load a repo's hooks), and the picker shows which files are in force. Skills (`.claude/skills`) and per-repo custom gates are still open.
 - O4 PR mode; quest report; whole-quest diff with inline comments as send-back notes.
 - Quest board backlog; "always allow" permission rules; opt-in MCP per repo.
 - Cost estimate on blueprints; error cards.

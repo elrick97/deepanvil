@@ -88,6 +88,12 @@ export class ProjectPicker {
     const meta = el('span', 'pj-meta');
     meta.textContent = `${p.quests} quest${p.quests === 1 ? '' : 's'}${p.active ? ' · working here' : ''}`;
     words.append(name, path, meta);
+    if (p.active && p.instructions) {
+      // Transparency: which of the repository's own instruction files the agents are following.
+      const inst = el('span', 'pj-inst');
+      inst.textContent = p.instructions.length ? `Agents follow ${p.instructions.join(' and ')}` : 'No CLAUDE.md or AGENTS.md here: agents rely on the code alone';
+      words.append(inst);
+    }
     row.append(ico, words);
     if (!p.active) {
       const go = el('button', 'btn');

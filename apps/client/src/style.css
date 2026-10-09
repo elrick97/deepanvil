@@ -598,6 +598,7 @@ html, body {
 .pj-name { font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
 .pj-path { font: 500 11px ui-monospace, 'Cascadia Mono', Menlo, monospace; opacity: 0.6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pj-meta { font-size: 11.5px; opacity: 0.72; }
+.pj-inst { font-size: 11.5px; color: #9fd8ff; opacity: 0.9; }
 .pj-forget { background: none; border: 0; color: inherit; opacity: 0.5; cursor: pointer; font-size: 14px; padding: 2px 6px; }
 .pj-forget:hover { opacity: 1; color: #ffb4a6; }
 .pj-row .btn[disabled] { opacity: 0.4; cursor: not-allowed; }
