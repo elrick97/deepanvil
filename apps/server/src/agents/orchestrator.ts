@@ -1,13 +1,13 @@
 import { existsSync } from 'node:fs';
 import { CREW, type BlueprintTaskView, type ClientCommand, type Dwarf, type ForgeEvent, type PlanAnswer, type PlanQuestion } from '@deepanvil/shared';
 import type { Store } from '../store.ts';
-import { plan, replan, type Blueprint, type BlueprintTask, type QA } from './forgemaster.ts';
+import { plan, replan, triage, type Blueprint, type BlueprintTask, type QA } from './forgemaster.ts';
 import { policyFor } from './gates.ts';
 import { addWorktree, commitAll, git, removeWorktree, worktreesDir } from './git.ts';
 import { linkDependencies, Odin } from './odin.ts';
 import { sonnetReview, type Reviewer } from './odin-review.ts';
 import { Ledger, type Emit } from './run.ts';
-import { runSmith } from './smith.ts';
+import { runSmith, type SmithOutcome } from './smith.ts';
 import { banter, digest } from './sprite.ts';
 
 // The live forge: request -> Opus blueprint -> your approval -> Sonnet smiths in parallel
@@ -29,13 +29,14 @@ export interface ForgeConfig {
 export interface Agents {
   plan: typeof plan;
   replan: typeof replan;
+  triage: typeof triage;
   runSmith: typeof runSmith;
   reviewer: Reviewer;
   digest: typeof digest;
   banter: typeof banter;
 }
 
-export const LIVE_AGENTS: Agents = { plan, replan, runSmith, reviewer: sonnetReview, digest, banter };
+export const LIVE_AGENTS: Agents = { plan, replan, triage, runSmith, reviewer: sonnetReview, digest, banter };
 
 interface PendingQuest {
   id: string;
@@ -82,6 +83,26 @@ interface Draft {
 /** At most this many rounds of questions; on the last round he must draft. */
 const PLAN_ROUNDS = 2;
 
+/** How often a smith's "blocked" may change the plan within one quest (each is an Opus call). */
+const MAX_REPLANS = 3;
+
+type TaskState = 'queued' | 'running' | 'merged' | 'failed' | 'replaced';
+
+/** The quest while it is being forged: the live task list the replanning ladder edits. */
+interface QuestRun {
+  id: string;
+  request: string;
+  blueprint: Blueprint;
+  /** Not yet started; mutated in place (the smiths pull from it). */
+  queue: BlueprintTask[];
+  state: Map<string, TaskState>;
+  titles: Map<string, string>;
+  replans: number;
+}
+
+/** What became of a task that a smith flagged as blocked. */
+type Change = { kind: 'rewrite'; task: BlueprintTask } | { kind: 'replaced'; reason: string } | { kind: 'fail'; reason: string };
+
 export class Forge {
   readonly ledger: Ledger;
   private store: Store;
@@ -91,6 +112,11 @@ export class Forge {
   private busy = false;
   private pending?: PendingQuest;
   private draft?: Draft;
+  private run?: QuestRun;
+  /** A question Thráin asked mid-quest (the form is the same as at drafting). */
+  private midAsk?: { questions: PlanQuestion[]; questId: string; resolve: (a: Record<string, PlanAnswer> | undefined) => void };
+  /** A proposed change of plan waiting for your yes or no. */
+  private changeWaits = new Map<string, (approve: boolean) => void>();
   private activeQuest?: string;
   private abort?: AbortController;
   private questN = 0;
@@ -169,6 +195,9 @@ export class Forge {
       case 'plan.skip':
         this.answerPlan(cmd.questId, undefined);
         break;
+      case 'plan.change':
+        this.changeWaits.get(cmd.changeId)?.(cmd.approve === true);
+        break;
       case 'blueprint.approve':
         if (this.pending?.id === cmd.questId && !this.activeQuest) void this.forge(this.pending);
         break;
@@ -227,6 +256,13 @@ export class Forge {
     this.say('Down tools, everyone. The quest is stopped.');
     this.abort.abort();
     this.keeper?.stop();
+    for (const decide of [...this.changeWaits.values()]) decide(false);
+    if (this.midAsk) {
+      const m = this.midAsk;
+      this.midAsk = undefined;
+      this.emit({ type: 'plan.answered', questId: m.questId });
+      m.resolve(undefined);
+    }
     for (const answer of [...this.answers.values()]) answer(false);
   }
 
@@ -307,6 +343,20 @@ export class Forge {
     }
   }
 
+  /** Your answers (or his own picks when you skipped) as the questions-and-answers he is shown next. */
+  private buildQA(asked: PlanQuestion[], answers: Record<string, PlanAnswer> | undefined): QA[] {
+    return asked.map((q) => {
+      const given = answers?.[q.id];
+      const labels = new Set(q.options.map((o) => o.label));
+      // Only real option labels count as picks; anything else must come as free text.
+      const picks = given ? given.picks.filter((l) => labels.has(l)).slice(0, q.multiSelect ? 4 : 1) : q.recommended;
+      const other = given?.other ? String(given.other).slice(0, 600) : undefined;
+      // An unanswered question falls back to Thráin's own pick.
+      const chosen = picks.length || other ? picks : q.recommended.length ? q.recommended : [q.options[0]!.label];
+      return { question: q, answer: { picks: chosen, other } };
+    });
+  }
+
   /** You ask for changes: Thráin redraws in the same conversation (one Opus turn, no new questions). */
   private async revise(questId: string, note: string): Promise<void> {
     const p = this.pending;
@@ -366,18 +416,16 @@ export class Forge {
 
   /** Your answers (or undefined: "just draft it" with Thráin's own picks) to the current questions. */
   private answerPlan(questId: string, answers: Record<string, PlanAnswer> | undefined): void {
+    const mid = this.midAsk;
+    if (mid && mid.questId === questId) {
+      this.midAsk = undefined;
+      this.emit({ type: 'plan.answered', questId });
+      mid.resolve(answers);
+      return;
+    }
     const draft = this.draft;
     if (!draft || draft.id !== questId || !draft.asked || this.activeQuest) return;
-    for (const q of draft.asked) {
-      const given = answers?.[q.id];
-      const labels = new Set(q.options.map((o) => o.label));
-      // Only real option labels count as picks; anything else must come as free text.
-      const picks = given ? given.picks.filter((l) => labels.has(l)).slice(0, q.multiSelect ? 4 : 1) : q.recommended;
-      const other = given?.other ? String(given.other).slice(0, 600) : undefined;
-      // An unanswered question falls back to Thráin's own pick.
-      const chosen = picks.length || other ? picks : q.recommended.length ? q.recommended : [q.options[0]!.label];
-      draft.qa.push({ question: q, answer: { picks: chosen, other } });
-    }
+    draft.qa.push(...this.buildQA(draft.asked, answers));
     draft.asked = undefined;
     this.emit({ type: 'plan.answered', questId });
     if (!answers) draft.round = PLAN_ROUNDS; // "just draft it": no more questions
@@ -399,17 +447,31 @@ export class Forge {
     // main may have changed outside the forge since the last check: look before anything is offered.
     await this.odin.checkHealth();
     const smiths = CREW.filter((d) => d.role === 'smith').slice(0, Math.max(1, this.cfg.smiths));
-    const queue = [...quest.blueprint.tasks];
+    const run: QuestRun = {
+      id: quest.id,
+      request: quest.request,
+      blueprint: quest.blueprint,
+      queue: [...quest.blueprint.tasks],
+      state: new Map(quest.blueprint.tasks.map((t) => [t.id, 'queued'])),
+      titles: new Map(quest.blueprint.tasks.map((t) => [t.id, t.title])),
+      replans: 0,
+    };
+    this.run = run;
+    const queue = run.queue;
     const merged: string[] = [];
     const failed: string[] = [];
 
     const work = async (smith: Dwarf): Promise<void> => {
       for (let task = queue.shift(); task && !this.stopped; task = queue.shift()) {
-        const ok = await this.runTask(quest.id, smith, task).catch((err: unknown) => {
+        run.state.set(task.id, 'running');
+        const result = await this.runTask(quest.id, smith, task).catch((err: unknown): 'failed' => {
           if (!this.stopped) this.emit({ type: 'forge.error', message: `${smith.name}: ${err instanceof Error ? err.message : String(err)}` });
-          return false;
+          return 'failed';
         });
-        (ok ? merged : failed).push(task.title);
+        run.state.set(task.id, result);
+        // A replaced task is neither merged nor failed: its successors carry the work.
+        if (result === 'merged') merged.push(task.title);
+        else if (result === 'failed') failed.push(task.title);
       }
     };
     await Promise.all(smiths.map(work));
@@ -426,23 +488,24 @@ export class Forge {
       );
       this.store.setQuestStatus(quest.id, merged.length ? 'done' : 'failed', { merged: merged.length, failed: failed.length });
     }
+    this.run = undefined;
     this.activeQuest = undefined;
     this.ledger.questId = undefined;
     this.history();
     this.setBusy(false);
   }
 
-  private async runTask(questId: string, smith: Dwarf, task: BlueprintTask): Promise<boolean> {
+  private async runTask(questId: string, smith: Dwarf, task: BlueprintTask): Promise<'merged' | 'failed' | 'replaced'> {
     const branch = `forge/${questId}/${task.id}`;
     const taskId = task.id;
     const offeringId = `${questId}-${taskId}`;
     let attempts = 0;
-    const record = (status: 'working' | 'merged' | 'failed', summary?: string) =>
+    const record = (status: 'working' | 'merged' | 'failed' | 'replaced', summary?: string) =>
       this.store.upsertTask(questId, taskId, task.title, smith.id, status, attempts, summary);
-    const fail = (summary: string): false => {
+    const fail = (summary: string): 'failed' => {
       record('failed', summary);
       this.store.bumpCrew(smith.id, 'tasks_failed');
-      return false;
+      return 'failed';
     };
     record('working');
     this.emit({ type: 'task.assigned', questId, taskId, dwarfId: smith.id, title: task.title });
@@ -464,6 +527,19 @@ export class Forge {
         await commitAll(worktree, `${task.title} (${smith.name}, attempt ${attempts})`);
         if (this.stopped) break;
 
+        if (outcome.status === 'blocked') {
+          // The task itself is wrong: not a failure. Thráin triages it (rewrite, reslice or ask you).
+          const change = await this.replanBlocked(smith, task, outcome);
+          if (change.kind === 'replaced') {
+            record('replaced', change.reason);
+            return 'replaced';
+          }
+          if (change.kind === 'fail') return fail(change.reason);
+          task = change.task;
+          notes = `Thráin redrew this task after you flagged it. Work from the new brief; it supersedes the old one.`;
+          continue;
+        }
+
         if (outcome.status === 'done' && outcome.testsPassed) {
           // Lay it on Odin's scales.
           revision++;
@@ -472,7 +548,7 @@ export class Forge {
             record('merged', outcome.summary);
             this.store.bumpCrew(smith.id, 'tasks_done');
             this.emit({ type: 'task.done', questId, taskId, dwarfId: smith.id });
-            return true;
+            return 'merged';
           }
           if (verdict.kind === 'abandoned') return fail('Abandoned.');
           notes = verdict.notes;
@@ -495,6 +571,115 @@ export class Forge {
     } finally {
       await removeWorktree(this.cfg.repo, worktree);
     }
+  }
+
+  // ------------------------------------------------------------------ replanning
+
+  /**
+   * A smith flagged their task as blocked. Thráin triages: rewrite it, reslice it into new tasks,
+   * or (when it hinges on a decision only you can make) ask you. Small changes just happen and are
+   * announced; one that grows the scope waits for your yes. Merged work stays on main.
+   */
+  private async replanBlocked(smith: Dwarf, task: BlueprintTask, outcome: SmithOutcome): Promise<Change> {
+    const run = this.run;
+    if (!run) return { kind: 'fail', reason: outcome.summary };
+    const blocker = outcome.blocker ?? { kind: 'wrong_assumption' as const, detail: outcome.summary };
+    if (run.replans >= MAX_REPLANS) {
+      return { kind: 'fail', reason: `Blocked (${blocker.detail}), and this quest has already been re-planned ${MAX_REPLANS} times.` };
+    }
+    run.replans++;
+    // The smith carries the ingot back to the Forgemaster's table (the escalation animation).
+    this.emit({ type: 'escalation', dwarfId: smith.id, taskId: task.id, reason: `blocked: ${blocker.detail}`.slice(0, 200) });
+    this.store.bumpCrew(smith.id, 'escalations');
+    this.say(`${smith.name} flags “${task.title}”: ${blocker.detail.slice(0, 140)}`);
+
+    const input = () => ({
+      request: run.request,
+      summary: run.blueprint.summary,
+      tasks: [...run.state].map(([id, status]) => ({ id, title: run.titles.get(id) ?? id, status })),
+      blocked: task,
+      kind: blocker.kind,
+      detail: blocker.detail,
+    });
+    let qa: QA[] = [];
+    let decision = await this.agents.triage({ ...input(), qa, canAsk: true }, this.cfg.repo, this.emit, this.ledger);
+    if (this.stopped) return { kind: 'fail', reason: 'Stopped.' };
+    if (decision.decision === 'ask') {
+      const questions = decision.questions;
+      const answers = await new Promise<Record<string, PlanAnswer> | undefined>((resolve) => {
+        this.midAsk = { questions, questId: run.id, resolve };
+        this.emit({ type: 'plan.questions', questId: run.id, round: 1, rounds: 1, questions });
+        this.say('I need your word on this before I redraw it.');
+      });
+      if (this.stopped) return { kind: 'fail', reason: 'Stopped.' };
+      qa = this.buildQA(questions, answers);
+      decision = await this.agents.triage({ ...input(), qa, canAsk: false }, this.cfg.repo, this.emit, this.ledger);
+      if (this.stopped) return { kind: 'fail', reason: 'Stopped.' };
+    }
+    if (decision.decision === 'ask') return { kind: 'fail', reason: 'Thráin could not decide how to change the plan.' };
+
+    const changeId = `${run.id}-c${run.replans}`;
+    if (decision.decision === 'rewrite') {
+      const next: BlueprintTask = { ...decision.task, id: task.id };
+      this.applyAmendment(run, changeId, decision.reason, { added: [], changed: [next], dropped: [] });
+      this.say(`Redrawn “${next.title}”: ${decision.reason}`);
+      return { kind: 'rewrite', task: next };
+    }
+
+    // Reslice: new tasks take this one's place; obsolete queued tasks are dropped.
+    const taken = new Set(run.titles.keys());
+    const added = decision.tasks.slice(0, 3).map((t, i) => {
+      const base = (t.id || `${task.id}-${i + 1}`).toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 28) || `task-${i + 1}`;
+      let id = base;
+      for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+      taken.add(id);
+      return { ...t, id };
+    });
+    const dropIds = decision.drop.filter((id) => run.queue.some((q) => q.id === id));
+    const dropped = [{ id: task.id, title: task.title }, ...dropIds.map((id) => ({ id, title: run.titles.get(id) ?? id }))];
+    const change = { added, changed: [], dropped };
+    // More work than before (new tasks beyond the ones they replace) is a change of scope: it needs your yes.
+    if (added.length > dropped.length) {
+      this.emit({ type: 'plan.amended', questId: run.id, changeId, state: 'proposed', reason: decision.reason, ...this.views(change) });
+      this.say('This grows the plan. Tell me whether to go ahead.');
+      const ok = await new Promise<boolean>((resolve) => {
+        this.changeWaits.set(changeId, (approve) => {
+          this.changeWaits.delete(changeId);
+          resolve(approve);
+        });
+      });
+      if (!ok) {
+        this.emit({ type: 'plan.amended', questId: run.id, changeId, state: 'declined', reason: decision.reason, ...this.views(change) });
+        return { kind: 'fail', reason: this.stopped ? 'Stopped.' : 'You kept the original plan; this piece is left undone.' };
+      }
+    }
+    this.applyAmendment(run, changeId, decision.reason, change);
+    this.say(`The plan is re-cut: ${decision.reason}`);
+    return { kind: 'replaced', reason: decision.reason };
+  }
+
+  private views(c: { added: BlueprintTask[]; changed: BlueprintTask[]; dropped: { id: string; title: string }[] }) {
+    return { added: view('', { title: '', summary: '', tasks: c.added }, 0).tasks, changed: view('', { title: '', summary: '', tasks: c.changed }, 0).tasks, dropped: c.dropped };
+  }
+
+  /** Make a change of plan real: the live queue, the task list, the stored blueprint, and tell the screens. */
+  private applyAmendment(run: QuestRun, changeId: string, reason: string, c: { added: BlueprintTask[]; changed: BlueprintTask[]; dropped: { id: string; title: string }[] }): void {
+    for (const d of c.dropped) {
+      const at = run.queue.findIndex((q) => q.id === d.id);
+      if (at >= 0) run.queue.splice(at, 1); // not started yet: it simply never runs
+      run.state.set(d.id, 'replaced');
+    }
+    run.queue.unshift(...c.added);
+    for (const t of c.added) {
+      run.state.set(t.id, 'queued');
+      run.titles.set(t.id, t.title);
+    }
+    for (const t of c.changed) run.titles.set(t.id, t.title);
+    const gone = new Set(c.dropped.map((d) => d.id));
+    const changed = new Map(c.changed.map((t) => [t.id, t]));
+    run.blueprint = { ...run.blueprint, tasks: [...run.blueprint.tasks.filter((t) => !gone.has(t.id)).map((t) => changed.get(t.id) ?? t), ...c.added] };
+    this.store.updateBlueprint(run.id, run.blueprint);
+    this.emit({ type: 'plan.amended', questId: run.id, changeId, state: 'applied', reason, ...this.views(c) });
   }
 
   /** Ring the bell and wait for your answer (a stopped quest answers "no"). */

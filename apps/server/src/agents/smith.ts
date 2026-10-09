@@ -10,10 +10,18 @@ import { digest } from './sprite.ts';
 // Hooks turn every tool call into a world event; oversized tool output is digested by
 // Pip (Haiku) before Sonnet reads it; anything risky rings the bell and waits for you.
 
+/** Why a smith stopped instead of forcing the task: it cannot be done as briefed. */
+export interface Blocker {
+  kind: 'wrong_assumption' | 'too_big' | 'depends_on_other' | 'out_of_scope';
+  detail: string;
+}
+
 export interface SmithOutcome {
-  status: 'done' | 'stuck';
+  /** done; stuck (tried and failed); blocked (the task itself is wrong: Thráin re-plans it). */
+  status: 'done' | 'stuck' | 'blocked';
   testsPassed: boolean;
   summary: string;
+  blocker?: Blocker;
 }
 
 // Appended to the shared Claude Code preset. Kept identical for every smith and task so the
@@ -24,6 +32,10 @@ const RULES = `You are a smith of Deepanvil, working one scoped task in your own
 - Change files with the Edit/Write tools, never with shell redirection or heredocs (those ring the human's bell).
 - Do not install packages or use the network unless truly required (it will ask a human).
 - When done: run the acceptance command, then commit your work with a one-line message (git add -A && git commit -m "<summary>"); no multi-line messages or trailers.
+- If the task cannot be done as briefed, do not force it: stop and report status "blocked" with a blocker kind and detail.
+  wrong_assumption: the brief rests on something the code contradicts. too_big: it is far larger than described.
+  depends_on_other: it needs work another task has not delivered. out_of_scope: you found something that needs a decision first.
+  Use "stuck" only when the task is sound but you could not make it work.
 - Finish with the structured result. testsPassed means the acceptance command succeeded.`;
 
 const OUTCOME_SCHEMA = {
@@ -31,9 +43,19 @@ const OUTCOME_SCHEMA = {
   additionalProperties: false,
   required: ['status', 'testsPassed', 'summary'],
   properties: {
-    status: { type: 'string', enum: ['done', 'stuck'] },
+    status: { type: 'string', enum: ['done', 'stuck', 'blocked'] },
     testsPassed: { type: 'boolean' },
-    summary: { type: 'string', description: 'What you changed and how you verified it, or why you are stuck (max 5 sentences)' },
+    summary: { type: 'string', description: 'What you changed and how you verified it, or why you are stuck or blocked (max 5 sentences)' },
+    blocker: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['kind', 'detail'],
+      description: 'Only when status is blocked',
+      properties: {
+        kind: { type: 'string', enum: ['wrong_assumption', 'too_big', 'depends_on_other', 'out_of_scope'] },
+        detail: { type: 'string', description: 'What is wrong with the task and what you would change (1-3 sentences)' },
+      },
+    },
   },
 };
 
@@ -159,8 +181,8 @@ export async function runSmith(run: SmithRun): Promise<SmithOutcome> {
     r.subtype === 'success' && r.structured_output
       ? (r.structured_output as SmithOutcome)
       : { status: 'stuck', testsPassed: false, summary: r.subtype === 'success' ? r.result.slice(0, 800) : `Engine stopped: ${r.subtype}` };
-  // The world needs to see a verdict even if no test command was recognised.
-  if (testEvents === 0) {
+  // The world needs to see a verdict even if no test command was recognised (a blocked task has none).
+  if (testEvents === 0 && out.status !== 'blocked') {
     emit(out.testsPassed ? { type: 'test.pass', dwarfId: smith.id, taskId: task.id } : { type: 'test.fail', dwarfId: smith.id, taskId: task.id, attempt: run.attempt });
   }
   return out;

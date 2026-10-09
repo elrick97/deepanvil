@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ForgeEvent, PlanQuestion } from '@deepanvil/shared';
 import { Store } from '../store.ts';
-import type { BlueprintTask, PlanInput } from './forgemaster.ts';
+import type { BlueprintTask, PlanInput, TriageInput } from './forgemaster.ts';
 import type { Policy } from './gates.ts';
 import type { Verdict } from './odin-review.ts';
 import { Forge, type Agents } from './orchestrator.ts';
@@ -100,7 +100,22 @@ const stubQuestion: PlanQuestion = {
   recommended: ['B'],
 };
 
+// How the stub Thráin triages a blocked task, and a gate that holds one smith busy until he has.
+let triageMode: 'rewrite' | 'reslice-equal' | 'reslice-grow' | 'ask-then-rewrite' = 'rewrite';
+const triageCalls: TriageInput[] = [];
+let holdOpen: (() => void) | undefined;
+let holdGate: Promise<void> = Promise.resolve();
+const blocked = (detail: string): SmithOutcome => ({ status: 'blocked', testsPassed: false, summary: detail, blocker: { kind: 'too_big', detail } });
+
 const stubs: Agents = {
+  triage: async (input) => {
+    triageCalls.push({ ...input, qa: [...input.qa] });
+    holdOpen?.();
+    if (triageMode === 'ask-then-rewrite' && input.canAsk) return { decision: 'ask', reason: 'needs your call', questions: [stubQuestion] };
+    if (triageMode === 'reslice-equal') return { decision: 'reslice', reason: 'cut differently', tasks: [task('blocky-a')], drop: ['t3'] };
+    if (triageMode === 'reslice-grow') return { decision: 'reslice', reason: 'two pieces now', tasks: [task('grow-a'), task('grow-b')], drop: [] };
+    return { decision: 'rewrite', reason: 'a clearer brief', task: { ...input.blocked, brief: `${input.blocked.brief} unblocked` } };
+  },
   plan: async (input, _repo, _emit, ledger) => {
     planCalls.push({ ...input, qa: [...input.qa] }); // a snapshot: the forge keeps appending to its own list
     if (askMode !== 'never' && input.canAsk && (askMode === 'always' || input.qa.length === 0)) return { kind: 'questions', questions: [stubQuestion], notes: 'repo notes' };
@@ -140,6 +155,17 @@ const stubs: Agents = {
       return done('rebased and resolved');
     }
     switch (id) {
+      case 'blocky':
+      case 'qblocky':
+        if (!run.task.brief.includes('unblocked')) return blocked('this is too big as briefed');
+        write(`${id}.txt`, 'ok\n');
+        return done(`did ${id}`);
+      case 'always-blocked':
+        return blocked('still impossible');
+      case 'hold':
+        await holdGate;
+        write('hold.txt', 'ok\n');
+        return done('did hold');
       case 'gatefix':
         write('gatefix.txt', notes.includes('gates failed') ? 'fixed\n' : 'BROKEN\n');
         return done('did gatefix');
@@ -337,6 +363,59 @@ async function main() {
   check('stop: quest marked interrupted', hist?.status === 'interrupted', hist?.status);
   check('stop: anvils cleared', worktrees() === 1);
   check('stop: no forge.error noise', !evs.some((e) => e.type === 'forge.error'));
+
+  // The replanning ladder: a blocked smith is triaged by Thráin; small changes just happen, bigger ones ask you.
+  const amended = (evs: ForgeEvent[], state: string) => evs.filter((e) => e.type === 'plan.amended' && e.state === state) as Extract<ForgeEvent, { type: 'plan.amended' }>[];
+  const heldGate = () => {
+    holdGate = new Promise<void>((resolve) => (holdOpen = resolve));
+  };
+
+  triageMode = 'rewrite';
+  triageCalls.length = 0;
+  evs = await quest([task('blocky')]);
+  check('blocked → rewritten → the same smith finishes it', merged(evs).join() === 'blocky' && triageCalls.length === 1 && amended(evs, 'applied')[0]?.changed[0]?.brief?.includes('unblocked') === true);
+  check('blocked: the smith carries the ingot back (escalation), no failure counted', evs.some((e) => e.type === 'escalation' && e.reason.startsWith('blocked')) && !evs.some((e) => e.type === 'test.fail'));
+  check('triage sees every task and what the smith said', triageCalls[0]?.tasks.map((t) => t.id).join() === 'blocky' && triageCalls[0].detail === 'this is too big as briefed' && triageCalls[0].canAsk);
+
+  triageMode = 'reslice-equal';
+  heldGate();
+  evs = await quest([task('blocky'), task('hold'), task('t3')]);
+  const cut = amended(evs, 'applied')[0];
+  check('reslice (same size): applied without asking, obsolete queued task dropped', cut?.added.map((t) => t.id).join() === 'blocky-a' && cut.dropped.map((d) => d.id).sort().join() === 'blocky,t3', JSON.stringify(cut?.dropped));
+  check('...the new task is forged, the dropped one never runs', merged(evs).join() === 'blocky-a,hold' && !evs.some((e) => e.type === 'task.assigned' && e.taskId === 't3'), merged(evs).join());
+  check('...and the stored blueprint follows the amendment', JSON.stringify(store.history(1)[0]).includes('"status":"done"'));
+  holdOpen = undefined;
+  holdGate = Promise.resolve();
+
+  triageMode = 'reslice-grow';
+  evs = await quest([task('blocky')], () => {
+    void waitFor((e) => e.type === 'plan.amended' && e.state === 'proposed').then((e) => forge.handle({ type: 'plan.change', changeId: (e as { changeId: string }).changeId, approve: true }));
+  });
+  check('reslice that grows the plan waits for you, then proceeds', amended(evs, 'proposed').length === 1 && amended(evs, 'applied').length === 1 && merged(evs).join() === 'grow-a,grow-b', merged(evs).join());
+
+  evs = await quest([task('blocky')], () => {
+    void waitFor((e) => e.type === 'plan.amended' && e.state === 'proposed' && events.indexOf(e) > events.length - 40).then((e) => forge.handle({ type: 'plan.change', changeId: (e as { changeId: string }).changeId, approve: false }));
+  });
+  check('declining keeps the original plan: the blocked piece is left undone', amended(evs, 'declined').length === 1 && merged(evs).length === 0 && !amended(evs, 'applied').length);
+
+  triageMode = 'ask-then-rewrite';
+  triageCalls.length = 0;
+  evs = await quest([task('qblocky')], () => {
+    void waitFor((e) => e.type === 'plan.questions' && events.indexOf(e) > events.length - 40).then((e) => forge.handle({ type: 'plan.answer', questId: (e as { questId: string }).questId, answers: { q1: { picks: ['A'] } } }));
+  });
+  check('a decision only you can make: Thráin asks mid-quest, then redraws', triageCalls.length === 2 && triageCalls[1]!.qa[0]?.answer.picks.join() === 'A' && !triageCalls[1]!.canAsk && merged(evs).join() === 'qblocky', `${triageCalls.length} calls`);
+
+  triageMode = 'rewrite';
+  triageCalls.length = 0;
+  evs = await quest([task('always-blocked')]);
+  check('replan cap: after three redraws the task fails instead of looping', triageCalls.length === 3 && merged(evs).length === 0 && store.history(1)[0]?.status === 'failed', `${triageCalls.length} calls`);
+
+  triageMode = 'reslice-grow';
+  evs = await quest([task('blocky')], () => {
+    void waitFor((e) => e.type === 'plan.amended' && e.state === 'proposed' && events.indexOf(e) > events.length - 40).then(() => forge.handle({ type: 'quest.abort' }));
+  });
+  check('stop while a change waits for your answer: the quest ends cleanly', store.history(1)[0]?.status === 'interrupted' && !evs.some((e) => e.type === 'forge.error'), store.history(1)[0]?.status);
+  triageMode = 'rewrite';
 
   // Clarifying questions: Thráin asks, you answer (or tell him to just draft), at most two rounds.
   const nextEvent = async <T extends ForgeEvent['type']>(type: T, from: number) =>

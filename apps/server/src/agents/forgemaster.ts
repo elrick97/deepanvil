@@ -218,6 +218,95 @@ export async function plan(input: PlanInput, repo: string, emit: Emit, ledger: L
   return { kind: 'blueprint', blueprint: bp, notes: String(out.notes ?? input.notes).slice(0, 2000) };
 }
 
+// ---------------------------------------------------------------- triage of a blocked task
+
+const TRIAGE = `
+
+A smith flagged a task as blocked: it cannot be done as briefed. Decide the smallest change that gets the quest moving:
+- "rewrite": the task itself was wrong or unclear, but its scope stands. Return the corrected task (same id).
+- "reslice": the work must be cut differently. Return 1 to 3 new tasks that replace the blocked one, and in "drop" the ids of
+  queued (not yet started) tasks that are now obsolete. Tasks run in parallel on disjoint files; work already merged stays on main.
+- "ask": only if the right fix hinges on a product or design decision the human must make (never something the repository
+  answers). Return 1 to 3 questions, each with 2 to 4 options and your recommended pick.
+Prefer rewrite over reslice and reslice over ask. Say in "reason", in one or two sentences, what was wrong and what you changed.`;
+
+export interface TriageInput {
+  request: string;
+  summary: string;
+  /** Every task in the quest and where it stands. */
+  tasks: { id: string; title: string; status: string }[];
+  blocked: BlueprintTask;
+  kind: string;
+  detail: string;
+  qa: QA[];
+  canAsk: boolean;
+}
+
+export type Triage =
+  | { decision: 'rewrite'; reason: string; task: BlueprintTask }
+  | { decision: 'reslice'; reason: string; tasks: BlueprintTask[]; drop: string[] }
+  | { decision: 'ask'; reason: string; questions: PlanQuestion[] };
+
+const TASK_SCHEMA = BLUEPRINT_SCHEMA.properties.tasks.items;
+
+function triageSchema(canAsk: boolean): Record<string, unknown> {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: ['decision', 'reason'],
+    properties: {
+      decision: { type: 'string', enum: canAsk ? ['rewrite', 'reslice', 'ask'] : ['rewrite', 'reslice'] },
+      reason: { type: 'string' },
+      task: TASK_SCHEMA,
+      tasks: { type: 'array', minItems: 1, maxItems: 3, items: TASK_SCHEMA },
+      drop: { type: 'array', items: { type: 'string' } },
+      ...(canAsk ? { questions: { type: 'array', maxItems: 3, items: QUESTION_SCHEMA } } : {}),
+    },
+  };
+}
+
+export async function triage(input: TriageInput, repo: string, emit: Emit, ledger: Ledger): Promise<Triage> {
+  const prompt = [
+    `The quest: ${input.request}`,
+    `Blueprint summary: ${input.summary}`,
+    `Tasks and where they stand:\n${input.tasks.map((t) => `- ${t.id} (${t.title}): ${t.status}`).join('\n')}`,
+    `The blocked task:\n${JSON.stringify(input.blocked)}`,
+    `The smith says it is blocked (${input.kind}): ${input.detail.slice(0, 2000)}`,
+    input.qa.length ? `\nThe human answered your questions:\n${qaText(input.qa)}` : '',
+    input.canAsk ? '\nDecide: rewrite, reslice or ask.' : '\nDecide now: rewrite or reslice (no more questions).',
+  ].join('\n');
+  const r = await runAgent(
+    {
+      dwarfId: 'thrain',
+      model: MODELS.opus,
+      prompt,
+      options: {
+        cwd: repo,
+        systemPrompt: SYSTEM + TRIAGE,
+        tools: READ_ONLY,
+        allowedTools: READ_ONLY,
+        maxTurns: 15,
+        effort: 'high',
+        outputFormat: { type: 'json_schema', schema: triageSchema(input.canAsk) },
+      },
+    },
+    emit,
+    ledger,
+  );
+  if (r.subtype !== 'success' || !r.structured_output) throw new Error(`The Forgemaster could not triage the blocked task (${r.subtype})`);
+  const out = r.structured_output as { decision?: string; reason?: string; task?: BlueprintTask; tasks?: BlueprintTask[]; drop?: unknown; questions?: unknown };
+  const reason = String(out.reason ?? '').slice(0, 400);
+  if (out.decision === 'ask' && input.canAsk) {
+    const questions = cleanQuestions(out.questions);
+    if (questions.length) return { decision: 'ask', reason, questions };
+  }
+  if (out.decision === 'reslice' && out.tasks?.length) {
+    return { decision: 'reslice', reason, tasks: out.tasks.slice(0, 3), drop: (Array.isArray(out.drop) ? out.drop : []).map(String).slice(0, 8) };
+  }
+  if (out.task) return { decision: 'rewrite', reason, task: out.task };
+  throw new Error('The Forgemaster returned no usable plan change');
+}
+
 /** Re-plan one task after a smith failed it twice. */
 export async function replan(task: BlueprintTask, failureNotes: string, repo: string, emit: Emit, ledger: Ledger): Promise<BlueprintTask> {
   const r = await runAgent(

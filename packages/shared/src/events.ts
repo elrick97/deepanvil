@@ -59,6 +59,12 @@ export type ForgeEvent =
   | { type: 'plan.questions'; questId: string; round: number; rounds: number; questions: PlanQuestion[] }
   /** The questions were answered (or the quest ended): every open form closes. */
   | { type: 'plan.answered'; questId: string }
+  /**
+   * The plan changed mid-quest because a smith flagged their task as blocked. "applied": it is
+   * done (the banner updates); "proposed": it grows the scope, so it waits for your answer
+   * (plan.change); "declined": you kept the original plan.
+   */
+  | { type: 'plan.amended'; questId: string; changeId: string; state: 'proposed' | 'applied' | 'declined'; reason: string; added: BlueprintTaskView[]; changed: BlueprintTaskView[]; dropped: { id: string; title: string }[] }
   | { type: 'blueprint.proposed'; questId: string; title: string; summary?: string; revision?: number; tasks: BlueprintTaskView[] }
   /** Thráin redrew the blueprint (or you dropped a task): same shape, but not a new quest. */
   | { type: 'blueprint.revised'; questId: string; title: string; summary?: string; revision: number; tasks: BlueprintTaskView[] }
@@ -143,6 +149,8 @@ export type ClientCommand =
   | { type: 'plan.answer'; questId: string; answers: Record<string, PlanAnswer> }
   /** "Just draft it": Thráin goes ahead with his own picks. */
   | { type: 'plan.skip'; questId: string }
+  /** Your answer to a proposed mid-quest change of plan. */
+  | { type: 'plan.change'; changeId: string; approve: boolean }
   | { type: 'blueprint.approve'; questId: string }
   /** Ask Thráin for changes; he redraws in the same conversation. */
   | { type: 'blueprint.revise'; questId: string; note: string }

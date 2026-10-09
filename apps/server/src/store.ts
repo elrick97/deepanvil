@@ -8,7 +8,7 @@ import type { Model, ModelTotals, QuestSummary } from '@deepanvil/shared';
 // node_modules shared with Windows). Lives in WSL at ~/.deepanvil/forge.db.
 
 export type QuestStatus = 'drafting' | 'proposed' | 'forging' | 'done' | 'rejected' | 'failed' | 'interrupted';
-export type TaskStatus = 'working' | 'merged' | 'failed';
+export type TaskStatus = 'working' | 'merged' | 'failed' | 'replaced';
 
 export class Store {
   private db: DatabaseSync;
@@ -110,6 +110,11 @@ export class Store {
 
   proposeQuest(id: string, title: string, blueprint: unknown): void {
     this.db.prepare("UPDATE quests SET title = ?, blueprint = ?, status = 'proposed' WHERE id = ?").run(title, JSON.stringify(blueprint), id);
+  }
+
+  /** The blueprint changed mid-quest (a replan): keep the stored plan current without touching the status. */
+  updateBlueprint(id: string, blueprint: unknown): void {
+    this.db.prepare('UPDATE quests SET blueprint = ? WHERE id = ?').run(JSON.stringify(blueprint), id);
   }
 
   setQuestStatus(id: string, status: QuestStatus, counts?: { merged: number; failed: number }): void {
