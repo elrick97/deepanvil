@@ -151,7 +151,7 @@ event contract.
 
 ### v0.3 — "Talk to the forge"
 - ✓ Clarifying questions: Thráin asks (at most two rounds, a recommended pick on every question) in a small form before he drafts; "Just draft it" uses his picks.
-- In-thread blueprint revision, blueprint detail view and editing.
+- ✓ Blueprint card: task detail (brief, files, acceptance), drop a task for free, ask Thráin for changes (he redraws in the same conversation; at most 6 redraws per blueprint). Inline editing of a task's text is still open.
 - Replanning ladder: smiths flag `blocked`, Thráin triages (small / re-slice / ask you), amended blueprint shown as a diff, and you can rescope mid-quest.
 - Library scholar for repo Q&A (read-only Sonnet at the lectern).
 - Whisper to a smith; pause, cancel or retry a single task.
