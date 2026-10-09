@@ -26,6 +26,7 @@ A painterly 3D dwarven forge-hall that visualizes and drives AI coding agents. F
 - Tiers: Opus plans/re-plans (`forgemaster.ts`), Sonnet smiths code in worktrees (`smith.ts`), Haiku digests/banter (`sprite.ts`). Permissions: `permissions.ts` allowlist (keep its table test passing).
 - **Odin keeps `main`** (`odin.ts`, `gates.ts`, `odin-review.ts`, design in `docs/ODIN.md`): smiths never merge; finished work is *offered*, rebased onto main in Odin's scratch worktree (`<repo>.anvils/odin`), gated (tests/types/lint, no tokens), reviewed by Sonnet (always Sonnet), then main is fast-forwarded. Policy per repo lives in the DB (`repo_policy`), auto-detected; sandbox = `auto`, other repos = `approve` (offering cards).
 - Quest history: `history` (last 30 quests) is a gauge event; `history.open` → `quest.detail` (`store.questDetail`) loads one quest on demand for the 📜 panel (`client/src/history.ts`).
+- Vault panel: `vault.open` → `vault.info` (`Odin.policy` + `store.recentOfferings`: current revision's gates with output tails, review); client `vaultpanel.ts`, opened by tapping the door (`Vault.doorTarget`) or the HUD "main" chip.
 - `bash scripts/server.sh selftest` (in WSL): zero-token orchestration test with stub agents on a throwaway repo — run it after touching the orchestrator, permissions or store. `smoke` measures per-call overhead on Haiku. Sandbox repo: `bash scripts/setup-sandbox.sh` (in WSL).
 
 ## Always-on forge (production)
