@@ -298,7 +298,27 @@ export class Crew {
     });
   }
 
+  private resting = false;
+  private nextZzz = 0;
+
+  /** The subscription limit is hit: everyone slumps at their anvil until it resets. */
+  private setResting(on: boolean): void {
+    this.resting = on;
+    for (const m of this.members.values()) {
+      if (m === this.master) continue;
+      if (on) {
+        m.ringing = false;
+        this.atHome(m, () => this.play(m, 'slump'));
+      } else {
+        this.goTo(m, 'home', () => this.play(m, 'cheer', 1.25, true));
+      }
+    }
+    if (on && this.master) this.say(this.master, 'The well of tokens is dry. We rest until it fills.', 5);
+    if (!on && this.master) this.say(this.master, 'The well is full again. To the anvils!', 4);
+  }
+
   handle(e: ForgeEvent): void {
+    if (e.type === 'forge.rest') return this.setResting(e.resting);
     if (e.type === 'offering.opened') this.offeringOwner.set(e.offeringId, e.dwarfId);
     if (e.type === 'offering.state' || e.type === 'offering.merged') {
       const m = this.members.get(this.offeringOwner.get(e.offeringId) ?? '');
@@ -458,6 +478,13 @@ export class Crew {
 
   update(t: number, dt: number): void {
     this.clock = t;
+    if (this.resting && t > this.nextZzz) {
+      // Snoring bubbles, one dwarf at a time.
+      const sleepers = [...this.members.values()].filter((m) => m !== this.master && m.at === 'home');
+      const m = sleepers[Math.floor(Math.random() * sleepers.length)];
+      if (m) this.say(m, 'Zzz…', 2.2);
+      this.nextZzz = t + 3 + Math.random() * 3;
+    }
     for (const m of this.members.values()) {
       if (m.path.length) {
         const target = m.path[0]!;

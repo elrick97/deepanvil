@@ -18,6 +18,7 @@ export class Hud {
   private spend?: { byModel: Partial<Record<Model, ModelTotals>>; totalUsd: number };
   private vault?: { status: 'green' | 'red' | 'unknown'; failing?: string[] };
   private offerings = new Map<string, string>(); // offeringId -> title
+  private restUntil?: number; // ms epoch while the crew rests through a subscription limit
 
   constructor(root: HTMLElement) {
     root.innerHTML = `
@@ -54,6 +55,7 @@ export class Hud {
     else if (e.type === 'limits') this.limits = { fiveHour: e.fiveHour, sevenDay: e.sevenDay };
     else if (e.type === 'ledger') this.spend = { byModel: e.byModel, totalUsd: e.totalUsd };
     else if (e.type === 'vault.health') this.vault = { status: e.status, failing: e.failing };
+    else if (e.type === 'forge.rest') this.restUntil = e.resting ? (e.until ?? Date.now() + 300_000) : undefined;
     else return;
     this.renderGauges();
   }
@@ -61,6 +63,10 @@ export class Hud {
   renderGauges(): void {
     const chips: { text: string | (Node | string)[]; cls?: string }[] = [];
     if (this.mode) chips.push({ text: this.mode });
+    if (this.restUntil) {
+      const mins = Math.max(1, Math.ceil((this.restUntil - Date.now()) / 60_000));
+      chips.push({ text: `😴 resting · back in ${mins >= 90 ? `${Math.round(mins / 60)}h` : `${mins}m`}`, cls: 'warn' });
+    }
     const win = (label: string, w?: LimitWindow) => {
       if (!w) return;
       const pct = Math.round(w.utilization * 100);
@@ -173,6 +179,7 @@ function describe(e: ForgeEvent, names: Map<string, string>): string | null {
     case 'banter': return null;
     case 'master.say': return `Thráin: ${e.text}`;
     case 'forge.error': return `⚠ ${e.message}`;
+    case 'forge.rest': return e.resting ? '😴 The subscription limit is reached: the crew rests until it resets' : '⚒ The limit has reset: back to work!';
     default: return null;
   }
 }

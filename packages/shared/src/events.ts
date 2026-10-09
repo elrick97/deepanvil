@@ -35,6 +35,8 @@ export type ForgeEvent =
   | { type: 'task.done'; questId: string; taskId: string; dwarfId: string }
   | { type: 'tool'; dwarfId: string; taskId: string; kind: ToolKind; summary: string }
   | { type: 'dwarf.log'; dwarfId: string; entry: LogEntry }
+  /** The subscription limit was hit: the crew rests until `until` (ms epoch), then work resumes by itself. */
+  | { type: 'forge.rest'; resting: boolean; until?: number; reason?: string }
   | { type: 'dwarf.todos'; dwarfId: string; items: TodoItem[] }
   | { type: 'test.pass'; dwarfId: string; taskId: string }
   | { type: 'test.fail'; dwarfId: string; taskId: string; attempt: number }

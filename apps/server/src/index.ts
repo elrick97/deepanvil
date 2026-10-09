@@ -35,7 +35,7 @@ const transcripts = new Map<string, string[]>();
 const todos = new Map<string, string>();
 // Latest gauges, so a phone that connects later sees the treasury and limits at once.
 const latest = new Map<string, string>();
-const GAUGES = new Set<ForgeEvent['type']>(['limits', 'ledger', 'forge.status', 'history', 'vault.health']);
+const GAUGES = new Set<ForgeEvent['type']>(['limits', 'ledger', 'forge.status', 'history', 'vault.health', 'forge.rest']);
 
 function envelope(event: ForgeEvent): string {
   const env: Envelope = { seq: ++seq, at: Date.now(), event };

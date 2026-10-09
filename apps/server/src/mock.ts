@@ -179,6 +179,14 @@ Duration  ${(0.4 + rnd() * 2).toFixed(1)}s`);
     emit({ type: 'blueprint.approved', questId });
     await sleep(1200);
 
+    // Every third quest hits the subscription limit: the crew naps for a moment, then carries on.
+    if (questN % 3 === 0) {
+      emit({ type: 'forge.rest', resting: true, until: Date.now() + 20_000, reason: 'subscription limit' });
+      await sleep(20_000);
+      emit({ type: 'forge.rest', resting: false });
+      await sleep(1500);
+    }
+
     // Tasks beyond the number of smiths wait for a free anvil.
     const queue = [...tasks];
     const free = [...smiths];

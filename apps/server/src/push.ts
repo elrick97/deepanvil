@@ -64,6 +64,10 @@ export class Pusher {
       case 'vault.health':
         if (e.status !== 'red') return;
         return this.send({ title: 'The Vault of Main is cracked', body: `${(e.failing ?? []).join(' and ')} fail on main.`, tag: 'vault-health' });
+      case 'forge.rest':
+        return this.send(e.resting
+          ? { title: '😴 The forge is resting', body: `Subscription limit reached${e.until ? `; work resumes around ${new Date(e.until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}.`, tag: 'forge-rest' }
+          : { title: '⚒ The forge is awake', body: 'The limit has reset; the crew is back at work.', tag: 'forge-rest' });
       case 'forge.error':
         return this.send({ title: 'Trouble at the forge', body: e.message, tag: 'forge-error' });
     }

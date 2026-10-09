@@ -13,6 +13,7 @@ import type { Policy } from './gates.ts';
 import type { Verdict } from './odin-review.ts';
 import { Forge, type Agents } from './orchestrator.ts';
 import { judge } from './permissions.ts';
+import { Ledger, waitForRest } from './run.ts';
 import type { SmithOutcome, SmithRun } from './smith.ts';
 
 const root = mkdtempSync(join(tmpdir(), 'deepanvil-selftest-'));
@@ -234,8 +235,29 @@ function permissionTable() {
   check(`permission table (${cases.length} cases)`, bad.length === 0, bad.map(([t, i]) => `${t} ${JSON.stringify(i)}`).join('; '));
 }
 
+/** The crew rests through a subscription limit and can be stopped while resting. */
+async function restingChecks() {
+  const ledger = new Ledger(store);
+  const seen: ForgeEvent[] = [];
+  const t0 = Date.now();
+  ledger.restUntil = t0 + 400;
+  await waitForRest(ledger, (e) => seen.push(e));
+  const rests = seen.filter((e) => e.type === 'forge.rest') as { resting: boolean }[];
+  check('limit hit: the crew rests until the reset, then wakes', rests.length === 2 && rests[0]!.resting && !rests[1]!.resting && Date.now() - t0 >= 380 && ledger.restUntil === 0);
+  await waitForRest(ledger, (e) => seen.push(e)); // nothing to wait for: instant and silent
+  check('no limit: no rest announced', seen.length === 2);
+
+  ledger.abort = new AbortController();
+  ledger.restUntil = Date.now() + 60_000;
+  const waiting = waitForRest(ledger, (e) => seen.push(e));
+  setTimeout(() => ledger.abort!.abort(), 100);
+  const stopped = await waiting.then(() => false, () => true);
+  check('stop while resting: wakes at once and says so', stopped && Date.now() - t0 < 5000 && (seen.at(-1) as { resting: boolean }).resting === false);
+}
+
 async function main() {
   permissionTable();
+  await restingChecks();
   await forge.recover();
   await waitFor((e) => e.type === 'vault.health');
   check('vault starts green', (events.find((e) => e.type === 'vault.health') as { status: string }).status === 'green');

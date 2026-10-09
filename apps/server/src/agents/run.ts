@@ -29,6 +29,8 @@ export class Ledger {
   questId?: string;
   /** The running quest's stop switch; every agent call under it is aborted with it. */
   abort?: AbortController;
+  /** While in the future, the subscription limit is hit and agent calls wait (ms epoch). */
+  restUntil = 0;
   private store: Store;
 
   constructor(store: Store) {
@@ -79,9 +81,75 @@ export interface RunSpec {
   options: Omit<Options, 'model' | 'pathToClaudeCodeExecutable'>;
 }
 
+const REST_MAX = 6 * 3_600_000; // beyond this (a weekly limit) we stop instead of sleeping for days
+const REST_MARGIN = 15_000;     // a little past the reset, so the first call isn't rejected again
+const REST_GUESS = 5 * 60_000;  // reset time unknown: look again in five minutes
+const RETRIES = 3;
+
+class RateLimited extends Error {
+  readonly resetsAt?: number;
+  constructor(resetsAt?: number) {
+    super('subscription limit reached');
+    this.resetsAt = resetsAt;
+  }
+}
+
+/** Sleep that a stop (the ledger's abort switch) can cut short. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error('stopped'));
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      reject(new Error('stopped'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** If the limit is known to be hit, announce it and wait out the reset. Stoppable. */
+export async function waitForRest(ledger: Ledger, emit: Emit): Promise<void> {
+  if (ledger.restUntil <= Date.now()) return;
+  emit({ type: 'forge.rest', resting: true, until: ledger.restUntil, reason: 'subscription limit' });
+  try {
+    while (ledger.restUntil > Date.now()) await sleep(Math.min(ledger.restUntil - Date.now(), 60_000), ledger.abort?.signal);
+  } finally {
+    // Either the reset came or the quest was stopped: the crew gets up.
+    ledger.restUntil = 0;
+    emit({ type: 'forge.rest', resting: false });
+  }
+}
+
+/**
+ * Run one agent call. If the subscription limit rejects it, the crew rests until the window
+ * resets (shown in the world) and the same call is run again: no work is lost or marked failed.
+ */
 export async function runAgent(spec: RunSpec, emit: Emit, ledger: Ledger): Promise<SDKResultMessage> {
+  for (let attempt = 0; ; attempt++) {
+    await waitForRest(ledger, emit);
+    try {
+      return await runOnce(spec, emit, ledger);
+    } catch (err) {
+      if (!(err instanceof RateLimited) || attempt >= RETRIES) {
+        if (err instanceof RateLimited) throw new Error('the subscription limit keeps rejecting calls; try again after it resets');
+        throw err;
+      }
+      const wait = err.resetsAt ? err.resetsAt * 1000 + REST_MARGIN - Date.now() : REST_GUESS;
+      if (wait > REST_MAX) {
+        throw new Error(`the subscription limit is reached until ${new Date(err.resetsAt! * 1000).toLocaleString()}; the forge cannot rest that long`);
+      }
+      ledger.restUntil = Math.max(ledger.restUntil, Date.now() + Math.max(wait, 30_000));
+    }
+  }
+}
+
+async function runOnce(spec: RunSpec, emit: Emit, ledger: Ledger): Promise<SDKResultMessage> {
   const seen = new Set<string>();
   let result: SDKResultMessage | undefined;
+  let limited: { resetsAt?: number } | undefined;
   for await (const msg of query({
     prompt: spec.prompt,
     options: {
@@ -98,6 +166,7 @@ export async function runAgent(spec: RunSpec, emit: Emit, ledger: Ledger): Promi
       stderr: (d) => process.stderr.write(`[engine:${spec.dwarfId}] ${d}`),
     },
   })) {
+    if (msg.type === 'assistant' && msg.error === 'rate_limit') limited ??= {};
     if (msg.type === 'assistant' && !msg.parent_tool_use_id) {
       const m = msg.message;
       // The live transcript: what the agent says and which tools it calls (results come from hooks).
@@ -125,12 +194,15 @@ export async function runAgent(spec: RunSpec, emit: Emit, ledger: Ledger): Promi
         unifiedWindows?: Record<string, { utilization: number; resetsAt: number }>;
       };
       emit({ type: 'limits', status: info.status, fiveHour: info.unifiedWindows?.five_hour, sevenDay: info.unifiedWindows?.seven_day });
+      if (info.status === 'rejected') limited = { resetsAt: info.resetsAt };
     } else if (msg.type === 'result') {
       result = msg;
       ledger.add(msg, spec.dwarfId);
       emit(ledger.event());
     }
   }
+  // A rejected call is not a failed task: hand it to the rest-and-retry loop.
+  if (limited && (!result || result.is_error || result.subtype !== 'success')) throw new RateLimited(limited.resetsAt);
   if (!result) throw new Error(`${spec.dwarfId}: the engine ended without a result`);
   return result;
 }
