@@ -54,6 +54,8 @@ export class Pusher {
         return this.send({ title: `🔔 ${who(e.dwarfId)} rings the bell`, body: `May I ${e.action}?`, tag: e.requestId, data: { requestId: e.requestId } });
       case 'permission.resolved':
         return; // the notification for it just goes stale; the bell card updates in-app
+      case 'plan.questions':
+        return this.send({ title: 'Thráin has questions', body: `${e.questions.length} quick question${e.questions.length === 1 ? '' : 's'} before he draws up the blueprint.`, tag: e.questId });
       case 'blueprint.proposed':
         return this.send({ title: 'Thráin’s blueprint is ready', body: `${e.title} — ${e.tasks.length} task(s). Light the forges?`, tag: e.questId });
       case 'merge':

@@ -28,6 +28,8 @@ const STATEFUL = new Set<ForgeEvent['type']>([
   'offering.opened', 'offering.state', 'offering.gate', 'offering.review', 'offering.merged',
 ]);
 let questLog: string[] = [];
+// Thráin's open questions, so a phone that connects while he waits for an answer sees the form.
+let openQuestions: string | undefined;
 // Each dwarf's recent transcript (agent speech, commands, output tails), replayed on connect.
 const TRANSCRIPT_KEEP = 80;
 const transcripts = new Map<string, string[]>();
@@ -48,6 +50,8 @@ const pusher = store ? new Pusher(store) : undefined;
 export function broadcast(event: ForgeEvent): void {
   pusher?.notifyFor(event);
   const msg = envelope(event);
+  if (event.type === 'plan.questions') openQuestions = msg;
+  if (event.type === 'plan.answered' || event.type === 'blueprint.proposed' || (event.type === 'forge.status' && !event.busy)) openQuestions = undefined;
   if (event.type === 'blueprint.proposed') {
     questLog = [];
     transcripts.clear();
@@ -118,6 +122,7 @@ wss.on('connection', (ws) => {
   ws.send(envelope({ type: 'hello', serverTime: Date.now(), crew: CREW }));
   if (pusher) ws.send(envelope({ type: 'push.config', publicKey: pusher.publicKey }));
   for (const msg of questLog) ws.send(msg);
+  if (openQuestions) ws.send(openQuestions);
   for (const list of transcripts.values()) for (const msg of list) ws.send(msg);
   for (const msg of todos.values()) ws.send(msg);
   for (const msg of latest.values()) ws.send(msg);

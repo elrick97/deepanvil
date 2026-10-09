@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
-import { CREW, type ClientCommand, type Dwarf } from '@deepanvil/shared';
+import { CREW, type ClientCommand, type Dwarf, type PlanAnswer, type PlanQuestion } from '@deepanvil/shared';
 import type { Store } from '../store.ts';
-import { plan, replan, type Blueprint, type BlueprintTask } from './forgemaster.ts';
+import { plan, replan, type Blueprint, type BlueprintTask, type QA } from './forgemaster.ts';
 import { policyFor } from './gates.ts';
 import { addWorktree, commitAll, git, removeWorktree, worktreesDir } from './git.ts';
 import { linkDependencies, Odin } from './odin.ts';
@@ -43,6 +43,20 @@ interface PendingQuest {
   blueprint: Blueprint;
 }
 
+/** Thráin's planning conversation before a blueprint exists: questions asked, answers given. */
+interface Draft {
+  id: string;
+  request: string;
+  round: number;
+  notes: string;
+  qa: QA[];
+  /** The questions waiting for your answer (undefined while Thráin is thinking). */
+  asked?: PlanQuestion[];
+}
+
+/** At most this many rounds of questions; on the last round he must draft. */
+const PLAN_ROUNDS = 2;
+
 export class Forge {
   readonly ledger: Ledger;
   private store: Store;
@@ -51,6 +65,7 @@ export class Forge {
   private agents: Agents;
   private busy = false;
   private pending?: PendingQuest;
+  private draft?: Draft;
   private activeQuest?: string;
   private abort?: AbortController;
   private questN = 0;
@@ -123,6 +138,12 @@ export class Forge {
       case 'quest.request':
         void this.request(cmd.text);
         break;
+      case 'plan.answer':
+        this.answerPlan(cmd.questId, cmd.answers);
+        break;
+      case 'plan.skip':
+        this.answerPlan(cmd.questId, undefined);
+        break;
       case 'blueprint.approve':
         if (this.pending?.id === cmd.questId) void this.forge(this.pending);
         break;
@@ -157,6 +178,15 @@ export class Forge {
 
   /** Stop whatever is running: agents are aborted, the bell is answered "no", anvils cleared. */
   private stop(): void {
+    if (this.draft && !this.activeQuest) {
+      // Thráin is waiting for your answers: stopping shelves the quest.
+      this.store.setQuestStatus(this.draft.id, 'rejected');
+      this.draft = undefined;
+      this.setBusy(false);
+      this.history();
+      this.say('Very well. I shelve the plan.');
+      return;
+    }
     if (this.pending && !this.activeQuest) {
       // Nothing is running yet: stopping a proposed blueprint is the same as rejecting it.
       return this.handle({ type: 'blueprint.reject', questId: this.pending.id });
@@ -198,18 +228,43 @@ export class Forge {
     this.say('Let me study the repository and draw up a blueprint…');
     const id = `q${++this.questN}-${Date.now().toString(36)}`;
     this.store.createQuest(id, text, this.cfg.repo);
+    this.draft = { id, request: text, round: 0, notes: '', qa: [] };
+    await this.draftTurn();
+  }
+
+  /** One turn of Thráin's planning: he either asks questions or hands over the blueprint. */
+  private async draftTurn(): Promise<void> {
+    const draft = this.draft;
+    if (!draft) return;
+    const { id } = draft;
     this.activeQuest = id;
     this.abort = new AbortController();
     this.ledger.questId = id;
     this.ledger.abort = this.abort;
     try {
-      const blueprint = await this.agents.plan(text, this.cfg.repo, this.emit, this.ledger);
+      const turn = await this.agents.plan(
+        { request: draft.request, qa: draft.qa, notes: draft.notes, canAsk: draft.round < PLAN_ROUNDS, round: draft.round + 1, rounds: PLAN_ROUNDS },
+        this.cfg.repo,
+        this.emit,
+        this.ledger,
+      );
       if (this.stopped) throw new Error('stopped');
+      if (turn.kind === 'questions') {
+        draft.round++;
+        draft.notes = turn.notes;
+        draft.asked = turn.questions;
+        this.emit({ type: 'plan.questions', questId: id, round: draft.round, rounds: PLAN_ROUNDS, questions: turn.questions });
+        this.say(draft.round === 1 ? 'A few questions before I draw this up.' : 'One more thing I need to know.');
+        return; // the forge stays busy; your answer (or "just draft it") continues the plan
+      }
+      const blueprint = turn.blueprint;
+      this.draft = undefined;
       this.store.proposeQuest(id, blueprint.title, blueprint);
-      this.pending = { id, request: text, blueprint };
+      this.pending = { id, request: draft.request, blueprint };
       this.emit({ type: 'blueprint.proposed', questId: id, title: blueprint.title, tasks: blueprint.tasks.map((t) => ({ id: t.id, title: t.title })) });
       this.say(blueprint.summary);
     } catch (err) {
+      this.draft = undefined;
       this.store.setQuestStatus(id, this.stopped ? 'interrupted' : 'failed');
       this.setBusy(false);
       if (!this.stopped) this.fail(err instanceof Error ? err.message : String(err));
@@ -218,6 +273,27 @@ export class Forge {
       this.ledger.questId = undefined;
       this.history();
     }
+  }
+
+  /** Your answers (or undefined: "just draft it" with Thráin's own picks) to the current questions. */
+  private answerPlan(questId: string, answers: Record<string, PlanAnswer> | undefined): void {
+    const draft = this.draft;
+    if (!draft || draft.id !== questId || !draft.asked || this.activeQuest) return;
+    for (const q of draft.asked) {
+      const given = answers?.[q.id];
+      const labels = new Set(q.options.map((o) => o.label));
+      // Only real option labels count as picks; anything else must come as free text.
+      const picks = given ? given.picks.filter((l) => labels.has(l)).slice(0, q.multiSelect ? 4 : 1) : q.recommended;
+      const other = given?.other ? String(given.other).slice(0, 600) : undefined;
+      // An unanswered question falls back to Thráin's own pick.
+      const chosen = picks.length || other ? picks : q.recommended.length ? q.recommended : [q.options[0]!.label];
+      draft.qa.push({ question: q, answer: { picks: chosen, other } });
+    }
+    draft.asked = undefined;
+    this.emit({ type: 'plan.answered', questId });
+    if (!answers) draft.round = PLAN_ROUNDS; // "just draft it": no more questions
+    this.say(answers ? 'Thank you. Let me think that through…' : 'Then I will use my own judgement.');
+    void this.draftTurn();
   }
 
   // ------------------------------------------------------------------ forging

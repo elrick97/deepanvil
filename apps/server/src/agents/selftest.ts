@@ -6,9 +6,9 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ForgeEvent } from '@deepanvil/shared';
+import type { ForgeEvent, PlanQuestion } from '@deepanvil/shared';
 import { Store } from '../store.ts';
-import type { BlueprintTask } from './forgemaster.ts';
+import type { BlueprintTask, PlanInput } from './forgemaster.ts';
 import type { Policy } from './gates.ts';
 import type { Verdict } from './odin-review.ts';
 import { Forge, type Agents } from './orchestrator.ts';
@@ -88,8 +88,24 @@ const task = (id: string): BlueprintTask => ({ id, title: id, brief: `do ${id}`,
 const done = (summary: string): SmithOutcome => ({ status: 'done', testsPassed: true, summary });
 const stuck = (summary: string): SmithOutcome => ({ status: 'stuck', testsPassed: false, summary });
 
+// How the stub Thráin behaves: never ask, ask once (first round only), or ask whenever he may.
+let askMode: 'never' | 'once' | 'always' = 'never';
+const planCalls: PlanInput[] = [];
+const stubQuestion: PlanQuestion = {
+  id: 'q1',
+  header: 'Scope',
+  question: 'Which way?',
+  options: [{ label: 'A', description: 'the small one' }, { label: 'B', description: 'the big one' }],
+  multiSelect: false,
+  recommended: ['B'],
+};
+
 const stubs: Agents = {
-  plan: async () => ({ title: 'Test quest', summary: 'stub', tasks: blueprintTasks }),
+  plan: async (input) => {
+    planCalls.push({ ...input, qa: [...input.qa] }); // a snapshot: the forge keeps appending to its own list
+    if (askMode !== 'never' && input.canAsk && (askMode === 'always' || input.qa.length === 0)) return { kind: 'questions', questions: [stubQuestion], notes: 'repo notes' };
+    return { kind: 'blueprint', blueprint: { title: 'Test quest', summary: 'stub', tasks: blueprintTasks } };
+  },
   replan: async (t) => {
     replans++;
     return { ...t, brief: `${t.brief} (redrawn)` };
@@ -319,6 +335,58 @@ async function main() {
   check('stop: quest marked interrupted', hist?.status === 'interrupted', hist?.status);
   check('stop: anvils cleared', worktrees() === 1);
   check('stop: no forge.error noise', !evs.some((e) => e.type === 'forge.error'));
+
+  // Clarifying questions: Thráin asks, you answer (or tell him to just draft), at most two rounds.
+  const nextEvent = async <T extends ForgeEvent['type']>(type: T, from: number) =>
+    (await waitFor((e) => e.type === type && events.indexOf(e) >= from)) as Extract<ForgeEvent, { type: T }>;
+  const ask = (text: string) => {
+    const from = events.length;
+    forge.handle({ type: 'quest.request', text });
+    return from;
+  };
+  const rejectDraft = (questId: string) => forge.handle({ type: 'blueprint.reject', questId });
+  blueprintTasks = [task('asked')];
+
+  askMode = 'once';
+  planCalls.length = 0;
+  let from = ask('something vague');
+  let qs = await nextEvent('plan.questions', from);
+  check('vague request: Thráin asks first, the forge stays busy', qs.round === 1 && qs.questions[0]?.recommended[0] === 'B' && !events.slice(from).some((e) => e.type === 'blueprint.proposed'));
+  forge.handle({ type: 'plan.answer', questId: qs.questId, answers: { q1: { picks: ['A', 'bogus'], other: 'and log it' } } });
+  let bp = await nextEvent('blueprint.proposed', from);
+  const second = planCalls[1];
+  check('answers reach the planner with his own notes', second?.qa[0]?.answer.picks.join() === 'A' && second.qa[0].answer.other === 'and log it' && second.notes === 'repo notes' && second.round === 2);
+  check('only real option labels count as picks', second?.qa[0]?.answer.picks.length === 1);
+  rejectDraft(bp.questId);
+
+  askMode = 'always';
+  planCalls.length = 0;
+  from = ask('vague again');
+  qs = await nextEvent('plan.questions', from);
+  forge.handle({ type: 'plan.skip', questId: qs.questId });
+  bp = await nextEvent('blueprint.proposed', from);
+  check('"just draft it": his own picks, no more questions', planCalls.length === 2 && !planCalls[1]!.canAsk && planCalls[1]!.qa[0]?.answer.picks.join() === 'B');
+  rejectDraft(bp.questId);
+
+  planCalls.length = 0;
+  from = ask('very vague');
+  qs = await nextEvent('plan.questions', from);
+  forge.handle({ type: 'plan.answer', questId: qs.questId, answers: { q1: { picks: ['A'] } } });
+  const round2 = await nextEvent('plan.questions', events.indexOf(qs) + 1);
+  forge.handle({ type: 'plan.answer', questId: round2.questId, answers: { q1: { picks: ['B'] } } });
+  bp = await nextEvent('blueprint.proposed', from);
+  check('two rounds at most: the third turn must draft', round2.round === 2 && planCalls.length === 3 && !planCalls[2]!.canAsk && planCalls[2]!.qa.length === 2);
+  rejectDraft(bp.questId);
+
+  askMode = 'once';
+  from = ask('abandoned');
+  qs = await nextEvent('plan.questions', from);
+  forge.handle({ type: 'quest.abort' });
+  await waitFor((e) => e.type === 'forge.status' && !e.busy && events.indexOf(e) > events.indexOf(qs));
+  check('stop while he waits for answers shelves the quest', store.history(1)[0]?.status === 'rejected', store.history(1)[0]?.status);
+  forge.handle({ type: 'plan.answer', questId: qs.questId, answers: {} }); // a late answer is ignored
+  check('a late answer after stopping does nothing', !events.slice(events.indexOf(qs) + 1).some((e) => e.type === 'blueprint.proposed'));
+  askMode = 'never';
 
   // Restart recovery: a proposed blueprint survives a restart.
   blueprintTasks = [task('later')];

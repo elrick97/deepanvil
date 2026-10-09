@@ -21,6 +21,24 @@ export interface LogEntry {
   text: string;
 }
 
+/** One clarifying question from the Forgemaster (an ask-question form: pick option(s) or write your own). */
+export interface PlanQuestion {
+  id: string;
+  /** Very short label for the question's chip, e.g. "Scope". */
+  header: string;
+  question: string;
+  options: { label: string; description: string }[];
+  multiSelect: boolean;
+  /** Labels of the option(s) Thráin would pick; pre-selected in the form. */
+  recommended: string[];
+}
+
+/** Your answer to one question: chosen option labels and/or free text ("Other…"). */
+export interface PlanAnswer {
+  picks: string[];
+  other?: string;
+}
+
 /** One line of an agent's own to-do list (its TodoWrite tool), shown on the anvil's chalkboard. */
 export interface TodoItem {
   text: string;
@@ -29,6 +47,9 @@ export interface TodoItem {
 
 export type ForgeEvent =
   | { type: 'hello'; serverTime: number; crew: Dwarf[] }
+  | { type: 'plan.questions'; questId: string; round: number; rounds: number; questions: PlanQuestion[] }
+  /** The questions were answered (or the quest ended): every open form closes. */
+  | { type: 'plan.answered'; questId: string }
   | { type: 'blueprint.proposed'; questId: string; title: string; tasks: { id: string; title: string }[] }
   | { type: 'blueprint.approved'; questId: string }
   | { type: 'task.assigned'; questId: string; taskId: string; dwarfId: string; title: string }
@@ -104,6 +125,9 @@ export interface ModelTotals {
 /** Commands the world (you) sends to the forge. */
 export type ClientCommand =
   | { type: 'quest.request'; text: string }
+  | { type: 'plan.answer'; questId: string; answers: Record<string, PlanAnswer> }
+  /** "Just draft it": Thráin goes ahead with his own picks. */
+  | { type: 'plan.skip'; questId: string }
   | { type: 'blueprint.approve'; questId: string }
   | { type: 'blueprint.reject'; questId: string }
   | { type: 'quest.abort' }
