@@ -247,6 +247,12 @@ export class Crew {
     this.spotTaken.set(spot, m.dwarf.id);
   }
 
+  /** Who can be tapped, and where on screen-space to test: a point at chest height. */
+  targets(): { id: string; point: THREE.Vector3 }[] {
+    return [...this.members.values()].map((m) => ({ id: m.dwarf.id, point: m.root.position.clone().setY(m.root.position.y + 1.0 * m.scale) }))
+      .concat(this.sprite && this.spriteId ? [{ id: this.spriteId, point: this.sprite.position.clone() }] : []);
+  }
+
   /** A live head position for a crew member (Odin's ravens deliver notes there). */
   headOf(id: string): (() => THREE.Vector3) | undefined {
     const m = this.members.get(id);

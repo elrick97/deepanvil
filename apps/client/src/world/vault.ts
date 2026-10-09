@@ -253,6 +253,11 @@ export class Vault {
 
   // ------------------------------------------------------------------ Odin
 
+  /** Odin as a tap target (chest height), for the dwarf card. */
+  target(): { id: string; point: THREE.Vector3 } | undefined {
+    return this.odin ? { id: 'odin', point: this.odin.position.clone().setY(this.odin.position.y + 1.2) } : undefined;
+  }
+
   private play(name: OdinClip, seconds = Infinity, once = false): void {
     const next = this.actions.get(name);
     if (!next) return;

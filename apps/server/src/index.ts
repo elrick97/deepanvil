@@ -28,6 +28,9 @@ const STATEFUL = new Set<ForgeEvent['type']>([
   'offering.opened', 'offering.state', 'offering.gate', 'offering.review', 'offering.merged',
 ]);
 let questLog: string[] = [];
+// Each dwarf's recent transcript (agent speech, commands, output tails), replayed on connect.
+const TRANSCRIPT_KEEP = 80;
+const transcripts = new Map<string, string[]>();
 // Latest gauges, so a phone that connects later sees the treasury and limits at once.
 const latest = new Map<string, string>();
 const GAUGES = new Set<ForgeEvent['type']>(['limits', 'ledger', 'forge.status', 'history', 'vault.health']);
@@ -43,7 +46,16 @@ const pusher = store ? new Pusher(store) : undefined;
 export function broadcast(event: ForgeEvent): void {
   pusher?.notifyFor(event);
   const msg = envelope(event);
-  if (event.type === 'blueprint.proposed') questLog = [];
+  if (event.type === 'blueprint.proposed') {
+    questLog = [];
+    transcripts.clear();
+  }
+  if (event.type === 'dwarf.log') {
+    const list = transcripts.get(event.dwarfId) ?? [];
+    list.push(msg);
+    if (list.length > TRANSCRIPT_KEEP) list.shift();
+    transcripts.set(event.dwarfId, list);
+  }
   if (STATEFUL.has(event.type)) questLog.push(msg);
   if (GAUGES.has(event.type)) latest.set(event.type, msg);
   for (const ws of clients) if (ws.readyState === ws.OPEN) ws.send(msg);
@@ -101,6 +113,7 @@ wss.on('connection', (ws) => {
   ws.send(envelope({ type: 'hello', serverTime: Date.now(), crew: CREW }));
   if (pusher) ws.send(envelope({ type: 'push.config', publicKey: pusher.publicKey }));
   for (const msg of questLog) ws.send(msg);
+  for (const list of transcripts.values()) for (const msg of list) ws.send(msg);
   for (const msg of latest.values()) ws.send(msg);
   ws.on('message', (data) => {
     if (!forge) return;

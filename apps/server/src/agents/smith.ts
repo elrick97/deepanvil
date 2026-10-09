@@ -3,7 +3,7 @@ import type { Dwarf } from '@deepanvil/shared';
 import { MODELS, SANDBOX_READY } from './engine.ts';
 import type { BlueprintTask } from './forgemaster.ts';
 import { isTestCommand, judge, kindOf } from './permissions.ts';
-import { runAgent, type Emit, type Ledger } from './run.ts';
+import { log, runAgent, type Emit, type Ledger } from './run.ts';
 import { digest } from './sprite.ts';
 
 // A Sonnet smith at their anvil: one scoped task, in their own git worktree.
@@ -74,6 +74,13 @@ export async function runSmith(run: SmithRun): Promise<SmithOutcome> {
   };
 
   const post: HookCallback = async (input) => {
+    if (input.hook_event_name === 'PostToolUseFailure') {
+      log(emit, smith.id, 'error', `${input.tool_name} failed: ${String((input as { error?: unknown }).error ?? '').slice(0, 400)}`);
+    } else if (input.hook_event_name === 'PostToolUse' && input.tool_name === 'Bash') {
+      // Tail of the output: the part that says whether it worked.
+      const out = outputText(input.tool_response).trim();
+      if (out) log(emit, smith.id, 'result', out.length > 500 ? `…${out.slice(-500)}` : out);
+    }
     if (input.hook_event_name === 'PostToolUseFailure' && input.tool_name === 'Bash') {
       const command = String((input.tool_input as { command?: string })?.command ?? '');
       if (isTestCommand(command)) {

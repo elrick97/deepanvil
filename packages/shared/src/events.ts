@@ -14,6 +14,13 @@ export interface Dwarf {
 
 export type ToolKind = 'read' | 'grep' | 'edit' | 'write' | 'bash';
 
+/** One line of a dwarf's live transcript (what the agent said, ran and got back). */
+export interface LogEntry {
+  at: number;
+  kind: 'say' | 'tool' | 'result' | 'error';
+  text: string;
+}
+
 export type ForgeEvent =
   | { type: 'hello'; serverTime: number; crew: Dwarf[] }
   | { type: 'blueprint.proposed'; questId: string; title: string; tasks: { id: string; title: string }[] }
@@ -21,6 +28,7 @@ export type ForgeEvent =
   | { type: 'task.assigned'; questId: string; taskId: string; dwarfId: string; title: string }
   | { type: 'task.done'; questId: string; taskId: string; dwarfId: string }
   | { type: 'tool'; dwarfId: string; taskId: string; kind: ToolKind; summary: string }
+  | { type: 'dwarf.log'; dwarfId: string; entry: LogEntry }
   | { type: 'test.pass'; dwarfId: string; taskId: string }
   | { type: 'test.fail'; dwarfId: string; taskId: string; attempt: number }
   | { type: 'permission.request'; dwarfId: string; requestId: string; action: string }

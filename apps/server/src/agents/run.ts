@@ -1,5 +1,5 @@
 import { query, type Options, type SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { ForgeEvent, Model } from '@deepanvil/shared';
+import type { ForgeEvent, LogEntry, Model } from '@deepanvil/shared';
 import { startOfToday, type Store } from '../store.ts';
 import { ENGINE_PATH } from './engine.ts';
 
@@ -47,6 +47,19 @@ export class Ledger {
   }
 }
 
+const LOG_MAX = 700;
+
+/** Append to a dwarf's transcript. Text is clipped here; the client renders it with textContent. */
+export function log(emit: Emit, dwarfId: string, kind: LogEntry['kind'], text: string): void {
+  emit({ type: 'dwarf.log', dwarfId, entry: { at: Date.now(), kind, text: text.length > LOG_MAX ? `${text.slice(0, LOG_MAX)}…` : text } });
+}
+
+function describeTool(name: string, input: unknown): string {
+  const i = (input ?? {}) as Record<string, unknown>;
+  const detail = i.command ?? i.file_path ?? i.pattern ?? i.path ?? i.url ?? '';
+  return detail ? `${name}: ${String(detail)}` : name;
+}
+
 export interface RunSpec {
   dwarfId: string;
   model: string;
@@ -74,8 +87,13 @@ export async function runAgent(spec: RunSpec, emit: Emit, ledger: Ledger): Promi
     },
   })) {
     if (msg.type === 'assistant' && !msg.parent_tool_use_id) {
-      // One API response can arrive as several messages; count its usage once.
       const m = msg.message;
+      // The live transcript: what the agent says and which tools it calls (results come from hooks).
+      for (const block of Array.isArray(m.content) ? m.content : []) {
+        if (block.type === 'text' && block.text.trim()) log(emit, spec.dwarfId, 'say', block.text);
+        else if (block.type === 'tool_use') log(emit, spec.dwarfId, 'tool', describeTool(block.name, block.input));
+      }
+      // One API response can arrive as several messages; count its usage once.
       if (seen.has(m.id)) continue;
       seen.add(m.id);
       const tier = tierOf(m.model);

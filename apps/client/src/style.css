@@ -272,3 +272,43 @@ html, body {
 .diff-body .d-hunk { color: #9fd8ff; }
 .diff-body .d-file { color: #ffcf7a; font-weight: 700; }
 .gauge.vault-red { border-color: var(--blood); color: #ffc0b4; }
+
+/* --- Tap a dwarf: the card and live transcript ------------------------------ */
+#card {
+  position: fixed;
+  top: max(112px, calc(env(safe-area-inset-top) + 104px));
+  right: max(12px, env(safe-area-inset-right));
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(70vh, calc(100vh - 270px));
+  z-index: 8;
+  display: flex;
+}
+#card[hidden] { display: none; }
+.dwarf-card { position: relative; display: flex; flex-direction: column; gap: 8px; width: 100%; min-height: 0; pointer-events: auto; }
+.dwarf-card .chip { align-self: flex-start; cursor: pointer; }
+.dwarf-card .icon-btn { position: absolute; top: 6px; right: 8px; background: none; border: 0; color: inherit; font-size: 16px; cursor: pointer; opacity: 0.7; }
+.dwarf-name { font-family: 'Cinzel', serif; font-size: 17px; letter-spacing: 0.04em; }
+.dwarf-sub { font-size: 12px; opacity: 0.75; margin-bottom: 4px; }
+.dwarf-line { font-size: 12px; display: flex; gap: 8px; overflow-wrap: anywhere; }
+.dwarf-k { opacity: 0.6; min-width: 52px; }
+.dwarf-log {
+  min-height: 90px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.28);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.log-line { display: flex; gap: 6px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.log-ico { flex: none; width: 1.3em; text-align: center; opacity: 0.8; }
+.log-tool .log-text { font-family: ui-monospace, 'Cascadia Mono', Menlo, monospace; color: #ffd9a0; }
+.log-result .log-text { font-family: ui-monospace, 'Cascadia Mono', Menlo, monospace; opacity: 0.7; }
+.log-error .log-text { color: #ffb4a6; }
+@media (max-width: 640px) {
+  /* Phones: the card slides in above the dock so the hall stays visible behind it. */
+  #card { top: auto; right: 50%; transform: translateX(50%); bottom: calc(max(14px, env(safe-area-inset-bottom)) + 130px); max-height: 38vh; }
+}

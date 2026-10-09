@@ -8,6 +8,7 @@ import { Bubbles } from './bubbles.ts';
 import { coinsOf } from './coins.ts';
 import { Controls } from './controls.ts';
 import { Hud } from './hud.ts';
+import { DwarfCard } from './dwarfcard.ts';
 import { OfferingCards } from './offerings.ts';
 import { Alerts } from './push.ts';
 import { QuestBanner } from './quest.ts';
@@ -122,6 +123,40 @@ function resize(): void {
 window.addEventListener('resize', resize);
 resize();
 
+// Tap a dwarf (or Odin): open their card. A tap is a press and release that barely moved,
+// so orbiting and pinching never open one. The nearest one within reach of the finger wins.
+const dwarfCard = new DwarfCard(document.querySelector('#card')!);
+let followId: string | undefined;
+const follow = new THREE.Vector3();
+dwarfCard.onFollow = (id) => {
+  followId = id;
+  if (id) controls.autoRotate = false;
+};
+controls.addEventListener('start', () => {
+  if (followId) {
+    followId = undefined;
+    dwarfCard.released();
+  }
+});
+{
+  let down: { x: number; y: number; t: number } | undefined;
+  const v = new THREE.Vector3();
+  canvas.addEventListener('pointerdown', (ev) => (down = { x: ev.clientX, y: ev.clientY, t: performance.now() }));
+  canvas.addEventListener('pointerup', (ev) => {
+    if (!down || Math.hypot(ev.clientX - down.x, ev.clientY - down.y) > 8 || performance.now() - down.t > 450) return;
+    const rect = canvas.getBoundingClientRect();
+    const reach = isTouchDevice ? 48 : 34; // px
+    let best: { id: string; d: number } | undefined;
+    for (const t of [...crew.targets(), vault.target()].filter((x): x is { id: string; point: THREE.Vector3 } => !!x)) {
+      v.copy(t.point).project(camera);
+      if (v.z > 1) continue;
+      const d = Math.hypot((v.x * 0.5 + 0.5) * rect.width + rect.left - ev.clientX, (-v.y * 0.5 + 0.5) * rect.height + rect.top - ev.clientY);
+      if (d < reach && (!best || d < best.d)) best = { id: t.id, d };
+    }
+    dwarfCard.open(best?.id);
+  });
+}
+
 const link = new ForgeLink();
 link.onStatus = (on) => hud.setLink(on);
 const forgeControls = new Controls(document.querySelector('#controls')!, (cmd) => link.send(cmd), crew.names);
@@ -130,6 +165,7 @@ const alerts = new Alerts(document.querySelector('.hud-meta')!, (cmd) => link.se
 const dispatch = (e: ForgeEvent): void => {
   crew.handle(e);
   vault.handle(e);
+  dwarfCard.handle(e);
   questBanner.handle(e);
   forgeControls.handle(e);
   offeringCards.handle(e);
@@ -163,6 +199,15 @@ renderer.setAnimationLoop(() => {
   clock.update();
   const dt = Math.min(clock.getDelta(), 0.05);
   const t = clock.getElapsed();
+  if (followId) {
+    // Glide the orbit centre onto the followed dwarf, carrying the camera with it.
+    const t0 = [...crew.targets(), vault.target()].find((x) => x?.id === followId);
+    if (t0) {
+      follow.copy(t0.point).setY(1.2).sub(controls.target).multiplyScalar(1 - Math.exp(-4 * dt));
+      controls.target.add(follow);
+      camera.position.add(follow);
+    }
+  }
   controls.update(dt);
   hall.update(t, dt);
   crew.update(t, dt);

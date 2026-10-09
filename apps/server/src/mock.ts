@@ -50,7 +50,12 @@ export function startMockForge(emit: (e: ForgeEvent) => void): void {
       cacheReadTokens: Math.round(rnd() * 18000 * scale),
       costUsd: Math.round(rnd() * 400 * scale) / 10000,
     });
-  const tool = (d: Dwarf, taskId: string, kind: ToolKind, summary: string) => emit({ type: 'tool', dwarfId: d.id, taskId, kind, summary });
+  const log = (d: Dwarf, kind: 'say' | 'tool' | 'result' | 'error', text: string) => emit({ type: 'dwarf.log', dwarfId: d.id, entry: { at: Date.now(), kind, text } });
+  const tool = (d: Dwarf, taskId: string, kind: ToolKind, summary: string) => {
+    emit({ type: 'tool', dwarfId: d.id, taskId, kind, summary });
+    if (kind === 'bash') log(d, 'tool', `Bash: ${summary}`);
+    else log(d, 'tool', `${{ read: 'Read', grep: 'Grep', edit: 'Edit', write: 'Write' }[kind]}: ${summary}`);
+  };
   const odinSay = (text: string) => emit({ type: 'odin.say', text });
 
   // Odin judges one offering at a time, like the real merge queue (agents/odin.ts).
@@ -105,6 +110,7 @@ export function startMockForge(emit: (e: ForgeEvent) => void): void {
       if (rnd() < 0.4) usage(smith);
       await jitter(1400);
     }
+    log(smith, 'say', 'I have the context I need; time to shape the code.');
     if (rnd() < 0.3) emit({ type: 'banter', dwarfId: smith.id, line: pick(BANTER) });
 
     for (let attempt = 1; ; attempt++) {
@@ -122,6 +128,8 @@ export function startMockForge(emit: (e: ForgeEvent) => void): void {
       }
       tool(smith, taskId, 'bash', 'npm test');
       await jitter(2600);
+      log(smith, 'result', `Tests  ${2 + Math.floor(rnd() * 12)} passed${rnd() < 0.28 ? ', 1 failed' : ''}
+Duration  ${(0.4 + rnd() * 2).toFixed(1)}s`);
       emit({ type: 'haiku.digest', fromDwarfId: smith.id, toDwarfId: master.id, note: pick(DIGESTS) });
       usage(sprite, 0.3);
       if (rnd() < 0.72 || attempt >= 3) {
