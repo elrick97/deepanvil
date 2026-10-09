@@ -99,7 +99,10 @@ flowchart LR
 The world only reacts to **events** (`packages/shared/src/events.ts`): a simulator and the real
 orchestrator speak the same contract, so the world can be developed without spending tokens.
 
-A quest: *request → Opus blueprint → your approval → Sonnet smiths in parallel worktrees →
+A quest: *request → Thráin asks clarifying questions (a small form, his pick pre-selected) →
+Opus blueprint, which you can read task by task, trim or send back for changes → your approval →
+Sonnet smiths in parallel worktrees (a smith that finds its task is wrong flags it and Thráin
+re-cuts the plan; you can rescope while it runs) →
 each finished piece is offered to **Odin**, who rebases it on the latest `main`, runs the gates,
 reviews the real diff (Sonnet) and fast-forwards `main` — or sends it back with notes (the second
 failure escalates to Opus for a re-plan) → the minecart rolls.* `main` only ever moves to a
@@ -235,10 +238,10 @@ it at anything you care about.
 
 | Version | Focus |
 |---|---|
-| **v0.1 — early alpha** (now) | The full loop: blueprint → parallel smiths → Odin's gates & review → green `main`; treasury, phone app, push, sandbox |
+| **v0.1 — early alpha** | The full loop: blueprint → parallel smiths → Odin's gates & review → green `main`; treasury, phone app, push, sandbox |
 | **v0.2** — Clear sight | ✓ Odin and the vault in the world; tap-a-dwarf cards, live transcripts, command slates, history |
-| **v0.3** — Talk to the forge | Conversational planning, repo Q&A, whispering to smiths, project instructions & skills |
-| **v0.4** — Real repos | Project picker, settings, GitHub PR mode, quest board backlog, opt-in MCP |
+| **v0.3** — Talk to the forge | ✓ Clarifying questions, blueprint revision, replanning when a task is blocked, rescoping mid-quest · later: repo Q&A, whispering to smiths |
+| **v0.4** — Real repos (next) | Project picker, project instructions (CLAUDE.md) and skills, settings, GitHub PR mode, quest board backlog, opt-in MCP |
 | **v0.5** — Other realms | OpenAI (Codex) and Gemini agents alongside Claude, assignable per role |
 | **v0.6** — The living hall | Crew lore, idle life, day/night, a hall that grows, chronicle & titles, music |
 | **v0.7** — Anyone can forge | `npx deepanvil` + setup wizard, native macOS/Linux, device pairing |

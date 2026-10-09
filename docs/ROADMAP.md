@@ -139,28 +139,27 @@ Legend: ✓ done · ◐ partial · ✗ missing. "Ver." is the target release (§
 Each release is usable on its own; every one keeps the mock simulator and self-test in step with the
 event contract.
 
-### v0.2 — "Clear sight" (in progress)
+### v0.2 — "Clear sight" (done 2026-10-09)
 - ✓ O3: Odin and the Vault of Main in the hall.
 - ✓ Tap-a-dwarf card (task, current action, coins, follow camera) with a live transcript per dwarf: the agent's words, commands and output tails (`dwarf.log` events, replayed to late joiners).
 - ✓ Command slate in front of each anvil (what the smith runs now; green or red on test results).
 - ✓ To-do chalkboard under each slate (the smith's own to-do list, `dwarf.todos` events, replayed to late joiners).
-- Per-command animations.
+- Per-command animations moved to v0.6 (polish: they mostly reuse existing clips).
 - ✓ History panel (📜 in the HUD): every past quest with outcome and coins; tap one for the request, each task with its smith and summary, spend per tier, and Odin's verdict on each piece.
 - ✓ Vault panel (tap the door, or the "main" chip): is main green, Odin's rules (merge mode, gates and their commands, size limit, protected paths) and the latest offerings with each gate's output and his review; refreshes while open.
 - ✓ Rate-limit "resting" state (a rejected call rests until the window resets, then the same call runs again; crew naps, HUD countdown, push on rest and wake); push for every needs-you moment (blueprint ready, awaiting you, main red, quest done).
 - ✓ Calm mode: after 25 s with no events or input the hall renders at 30 fps (a hidden tab already pauses); anything wakes it.
 
-### v0.3 — "Talk to the forge"
+### v0.3 — "Talk to the forge" (conversation done 2026-10-09; the rest follows later)
 - ✓ Clarifying questions: Thráin asks (at most two rounds, a recommended pick on every question) in a small form before he drafts; "Just draft it" uses his picks.
 - ✓ Blueprint card: task detail (brief, files, acceptance), drop a task for free, ask Thráin for changes (he redraws in the same conversation; at most 6 redraws per blueprint). Inline editing of a task's text is still open.
 - ✓ Replanning ladder: a smith flags `blocked` (wrong assumption / too big / depends on another task / out of scope) instead of failing; Thráin triages: rewrite (automatic), re-slice (automatic unless it adds more tasks than it replaces, then a card with the diff waits for your yes), or ask you through the question form. At most 3 replans per quest; merged work stays on main.
 - ✓ Rescope mid-quest by hand: while forging, the composer becomes a "change the plan" line; Thráin sees every task and where it stands and proposes a re-cut (drop queued or running tasks, add up to 4) that always waits for your yes. Merged work and pieces with Odin are never touched; at most 4 per quest.
-- Library scholar for repo Q&A (read-only Sonnet at the lectern).
-- Whisper to a smith; pause, cancel or retry a single task.
-- Project instructions and skills (CLAUDE.md / AGENTS.md); per-repo custom gates.
+- Still to do: library scholar for repo Q&A (read-only Sonnet at the lectern); whisper to a smith; pause, cancel or retry a single task; editing a task's text in the blueprint card.
 
 ### v0.4 — "Real repos"
 - Project picker (local path or GitHub clone), dirty-repo handling, settings panel.
+- Project instructions and skills (CLAUDE.md / AGENTS.md) for Thráin and the smiths; per-repo custom gates. (Today `settingSources: []` makes agents ignore a repo's own instructions: the first thing real repos need.)
 - O4 PR mode; quest report; whole-quest diff with inline comments as send-back notes.
 - Quest board backlog; "always allow" permission rules; opt-in MCP per repo.
 - Cost estimate on blueprints; error cards.
