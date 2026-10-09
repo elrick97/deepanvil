@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { CREW, type BlueprintTaskView, type ClientCommand, type Dwarf, type ForgeEvent, type PlanAnswer, type PlanQuestion } from '@deepanvil/shared';
 import type { Store } from '../store.ts';
-import { plan, replan, triage, type Blueprint, type BlueprintTask, type QA } from './forgemaster.ts';
+import { plan, replan, rescope, triage, type Blueprint, type BlueprintTask, type QA } from './forgemaster.ts';
 import { policyFor } from './gates.ts';
 import { addWorktree, commitAll, git, removeWorktree, worktreesDir } from './git.ts';
 import { linkDependencies, Odin } from './odin.ts';
@@ -30,13 +30,14 @@ export interface Agents {
   plan: typeof plan;
   replan: typeof replan;
   triage: typeof triage;
+  rescope: typeof rescope;
   runSmith: typeof runSmith;
   reviewer: Reviewer;
   digest: typeof digest;
   banter: typeof banter;
 }
 
-export const LIVE_AGENTS: Agents = { plan, replan, triage, runSmith, reviewer: sonnetReview, digest, banter };
+export const LIVE_AGENTS: Agents = { plan, replan, triage, rescope, runSmith, reviewer: sonnetReview, digest, banter };
 
 interface PendingQuest {
   id: string;
@@ -86,7 +87,10 @@ const PLAN_ROUNDS = 2;
 /** How often a smith's "blocked" may change the plan within one quest (each is an Opus call). */
 const MAX_REPLANS = 3;
 
-type TaskState = 'queued' | 'running' | 'merged' | 'failed' | 'replaced';
+/** How often you may rescope one quest by hand (each is an Opus call). */
+const MAX_RESCOPES = 4;
+
+type TaskState = 'queued' | 'running' | 'offered' | 'merged' | 'failed' | 'replaced';
 
 /** The quest while it is being forged: the live task list the replanning ladder edits. */
 interface QuestRun {
@@ -98,6 +102,12 @@ interface QuestRun {
   state: Map<string, TaskState>;
   titles: Map<string, string>;
   replans: number;
+  /** A stop switch per task in progress, so a rescope can stop one smith. */
+  cancel: Map<string, AbortController>;
+  smithOf: Map<string, string>;
+  rescopes: number;
+  /** A rescope is being worked out or waits for your yes: one at a time. */
+  rescoping: boolean;
 }
 
 /** What became of a task that a smith flagged as blocked. */
@@ -197,6 +207,9 @@ export class Forge {
         break;
       case 'plan.change':
         this.changeWaits.get(cmd.changeId)?.(cmd.approve === true);
+        break;
+      case 'quest.rescope':
+        void this.rescope(cmd.questId, String(cmd.note ?? ''));
         break;
       case 'blueprint.approve':
         if (this.pending?.id === cmd.questId && !this.activeQuest) void this.forge(this.pending);
@@ -455,6 +468,10 @@ export class Forge {
       state: new Map(quest.blueprint.tasks.map((t) => [t.id, 'queued'])),
       titles: new Map(quest.blueprint.tasks.map((t) => [t.id, t.title])),
       replans: 0,
+      cancel: new Map(),
+      smithOf: new Map(),
+      rescopes: 0,
+      rescoping: false,
     };
     this.run = run;
     const queue = run.queue;
@@ -513,6 +530,18 @@ export class Forge {
       void this.agents.banter(smith.name, `starting "${task.title}"`, this.emit, this.ledger).then((line) => line && this.emit({ type: 'banter', dwarfId: smith.id, line }), () => undefined);
     }
 
+    // This task's own stop switch: the quest's stop pulls it too, and a rescope can pull it alone.
+    const taskAbort = new AbortController();
+    const onQuestStop = (): void => taskAbort.abort();
+    this.abort?.signal.addEventListener('abort', onQuestStop, { once: true });
+    this.run?.cancel.set(taskId, taskAbort);
+    this.run?.smithOf.set(taskId, smith.id);
+    const cancelled = (): boolean => taskAbort.signal.aborted && !this.stopped;
+    const stoppedByRescope = (): 'replaced' => {
+      record('replaced', 'Stopped by a rescope.');
+      return 'replaced';
+    };
+
     // The worktree lives until the offering is merged or abandoned: send-backs are fixed in place.
     const worktree = await addWorktree(this.cfg.repo, `${smith.id}-${taskId}`, branch);
     linkDependencies(this.cfg.repo, worktree);
@@ -522,8 +551,17 @@ export class Forge {
       let notes: string | undefined;
       let replanned = false;
       while (!this.stopped) {
+        // A rescope can pull this task before its smith has even started: don't launch an agent for it.
+        if (cancelled()) return stoppedByRescope();
         attempts++;
-        const outcome = await this.agents.runSmith({ smith, task, worktree, attempt: attempts, notes, emit: this.emit, ledger: this.ledger, ask: (a) => this.ask(smith, a) });
+        let outcome: SmithOutcome;
+        try {
+          outcome = await this.agents.runSmith({ smith, task, worktree, attempt: attempts, notes, emit: this.emit, ledger: this.ledger, abort: taskAbort, ask: (a) => this.ask(smith, a) });
+        } catch (err) {
+          if (cancelled()) return stoppedByRescope();
+          throw err;
+        }
+        if (cancelled()) return stoppedByRescope();
         await commitAll(worktree, `${task.title} (${smith.name}, attempt ${attempts})`);
         if (this.stopped) break;
 
@@ -543,6 +581,7 @@ export class Forge {
         if (outcome.status === 'done' && outcome.testsPassed) {
           // Lay it on Odin's scales.
           revision++;
+          this.run?.state.set(taskId, 'offered'); // past this point a rescope can no longer stop it
           const verdict = await this.odin.offer({ id: offeringId, questId, taskId, dwarfId: smith.id, title: task.title, branch, revision, task });
           if (verdict.kind === 'merged') {
             record('merged', outcome.summary);
@@ -551,6 +590,7 @@ export class Forge {
             return 'merged';
           }
           if (verdict.kind === 'abandoned') return fail('Abandoned.');
+          this.run?.state.set(taskId, 'running');
           notes = verdict.notes;
         } else {
           notes = outcome.summary;
@@ -569,6 +609,8 @@ export class Forge {
       }
       return fail('Stopped.');
     } finally {
+      this.abort?.signal.removeEventListener('abort', onQuestStop);
+      this.run?.cancel.delete(taskId);
       await removeWorktree(this.cfg.repo, worktree);
     }
   }
@@ -627,14 +669,7 @@ export class Forge {
     }
 
     // Reslice: new tasks take this one's place; obsolete queued tasks are dropped.
-    const taken = new Set(run.titles.keys());
-    const added = decision.tasks.slice(0, 3).map((t, i) => {
-      const base = (t.id || `${task.id}-${i + 1}`).toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 28) || `task-${i + 1}`;
-      let id = base;
-      for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
-      taken.add(id);
-      return { ...t, id };
-    });
+    const added = this.fresh(run, decision.tasks.slice(0, 3), task.id);
     const dropIds = decision.drop.filter((id) => run.queue.some((q) => q.id === id));
     const dropped = [{ id: task.id, title: task.title }, ...dropIds.map((id) => ({ id, title: run.titles.get(id) ?? id }))];
     const change = { added, changed: [], dropped };
@@ -642,12 +677,7 @@ export class Forge {
     if (added.length > dropped.length) {
       this.emit({ type: 'plan.amended', questId: run.id, changeId, state: 'proposed', reason: decision.reason, ...this.views(change) });
       this.say('This grows the plan. Tell me whether to go ahead.');
-      const ok = await new Promise<boolean>((resolve) => {
-        this.changeWaits.set(changeId, (approve) => {
-          this.changeWaits.delete(changeId);
-          resolve(approve);
-        });
-      });
+      const ok = await this.awaitChange(changeId);
       if (!ok) {
         this.emit({ type: 'plan.amended', questId: run.id, changeId, state: 'declined', reason: decision.reason, ...this.views(change) });
         return { kind: 'fail', reason: this.stopped ? 'Stopped.' : 'You kept the original plan; this piece is left undone.' };
@@ -658,12 +688,97 @@ export class Forge {
     return { kind: 'replaced', reason: decision.reason };
   }
 
+  /** Wait for your yes or no on a proposed change (stop answers "no"). */
+  private awaitChange(changeId: string): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      this.changeWaits.set(changeId, (approve) => {
+        this.changeWaits.delete(changeId);
+        resolve(approve);
+      });
+    });
+  }
+
+  /** New tasks with ids that are safe (they become branch names) and unique within the quest. */
+  private fresh(run: QuestRun, tasks: BlueprintTask[], prefix: string): BlueprintTask[] {
+    const taken = new Set(run.titles.keys());
+    return tasks.map((t, i) => {
+      const base = (t.id || `${prefix}-${i + 1}`).toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 28) || `task-${i + 1}`;
+      let id = base;
+      for (let n = 2; taken.has(id); n++) id = `${base}-${n}`;
+      taken.add(id);
+      return { ...t, id };
+    });
+  }
+
+  /** Stop one task's smith (a rescope dropped it) and answer any bell it was waiting on. */
+  private cancelTask(run: QuestRun, taskId: string): void {
+    run.cancel.get(taskId)?.abort();
+    const smithId = run.smithOf.get(taskId);
+    if (!smithId) return;
+    for (const [requestId, answer] of [...this.answers]) if (requestId.startsWith(`${smithId}-`)) answer(false);
+  }
+
+  /**
+   * You change the plan while the crew works. Thráin looks at where everything stands and proposes the
+   * new cut; it always waits for your yes, because it may stop a smith mid-task. Merged work and
+   * pieces already with Odin are never touched.
+   */
+  private async rescope(questId: string, note: string): Promise<void> {
+    const run = this.run;
+    const text = note.trim().slice(0, 2000);
+    if (!run || run.id !== questId || !this.activeQuest || !text || run.rescoping) return;
+    if (run.rescopes >= MAX_RESCOPES) return this.say('We have re-cut this quest often enough. Let the crew finish it, or stop it and start afresh.');
+    run.rescoping = true;
+    run.rescopes++;
+    this.say('Let me see where everything stands…');
+    try {
+      const briefs = new Map(run.blueprint.tasks.map((t) => [t.id, t.brief]));
+      const decision = await this.agents.rescope(
+        {
+          request: run.request,
+          summary: run.blueprint.summary,
+          tasks: [...run.state].map(([id, status]) => ({ id, title: run.titles.get(id) ?? id, status: status === 'offered' ? 'in_review' : status, brief: briefs.get(id) ?? '' })),
+          note: text,
+        },
+        this.cfg.repo,
+        this.emit,
+        this.ledger,
+      );
+      if (this.stopped) return;
+      const open = (id: string): boolean => run.state.get(id) === 'queued' || run.state.get(id) === 'running';
+      const added = decision.decision === 'change' ? this.fresh(run, decision.add, 'new') : [];
+      const dropIds = decision.decision === 'change' ? [...new Set(decision.drop)].filter(open) : [];
+      if (decision.decision === 'none' || (!added.length && !dropIds.length)) return this.say(decision.reason || 'The plan already covers that.');
+
+      const title = (id: string) => ({ id, title: run.titles.get(id) ?? id });
+      const stopping = dropIds.filter((id) => run.state.get(id) === 'running');
+      const changeId = `${run.id}-r${run.rescopes}`;
+      this.emit({ type: 'plan.amended', questId: run.id, changeId, state: 'proposed', source: 'rescope', reason: decision.reason, ...this.views({ added, changed: [], dropped: dropIds.map(title) }), stopping });
+      this.say('Here is how I would re-cut it. Tell me whether to go ahead.');
+      const ok = await this.awaitChange(changeId);
+      if (!ok || this.stopped) {
+        this.emit({ type: 'plan.amended', questId: run.id, changeId, state: 'declined', source: 'rescope', reason: decision.reason, ...this.views({ added, changed: [], dropped: dropIds.map(title) }) });
+        if (!this.stopped) this.say('As you wish: the plan stays as it was.');
+        return;
+      }
+      // The world moved while you decided: only what can still be stopped is stopped.
+      const still = dropIds.filter(open);
+      for (const id of still) if (run.state.get(id) === 'running') this.cancelTask(run, id);
+      this.applyAmendment(run, changeId, decision.reason, { added, changed: [], dropped: still.map(title) }, 'rescope');
+      this.say(`The plan is re-cut: ${decision.reason}`);
+    } catch (err) {
+      if (!this.stopped) this.fail(err instanceof Error ? err.message : String(err));
+    } finally {
+      run.rescoping = false;
+    }
+  }
+
   private views(c: { added: BlueprintTask[]; changed: BlueprintTask[]; dropped: { id: string; title: string }[] }) {
     return { added: view('', { title: '', summary: '', tasks: c.added }, 0).tasks, changed: view('', { title: '', summary: '', tasks: c.changed }, 0).tasks, dropped: c.dropped };
   }
 
   /** Make a change of plan real: the live queue, the task list, the stored blueprint, and tell the screens. */
-  private applyAmendment(run: QuestRun, changeId: string, reason: string, c: { added: BlueprintTask[]; changed: BlueprintTask[]; dropped: { id: string; title: string }[] }): void {
+  private applyAmendment(run: QuestRun, changeId: string, reason: string, c: { added: BlueprintTask[]; changed: BlueprintTask[]; dropped: { id: string; title: string }[] }, source: 'blocked' | 'rescope' = 'blocked'): void {
     for (const d of c.dropped) {
       const at = run.queue.findIndex((q) => q.id === d.id);
       if (at >= 0) run.queue.splice(at, 1); // not started yet: it simply never runs
@@ -679,7 +794,7 @@ export class Forge {
     const changed = new Map(c.changed.map((t) => [t.id, t]));
     run.blueprint = { ...run.blueprint, tasks: [...run.blueprint.tasks.filter((t) => !gone.has(t.id)).map((t) => changed.get(t.id) ?? t), ...c.added] };
     this.store.updateBlueprint(run.id, run.blueprint);
-    this.emit({ type: 'plan.amended', questId: run.id, changeId, state: 'applied', reason, ...this.views(c) });
+    this.emit({ type: 'plan.amended', questId: run.id, changeId, state: 'applied', source, reason, ...this.views(c) });
   }
 
   /** Ring the bell and wait for your answer (a stopped quest answers "no"). */

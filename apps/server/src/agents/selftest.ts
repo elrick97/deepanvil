@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ForgeEvent, PlanQuestion } from '@deepanvil/shared';
 import { Store } from '../store.ts';
-import type { BlueprintTask, PlanInput, TriageInput } from './forgemaster.ts';
+import type { BlueprintTask, PlanInput, RescopeInput, TriageInput } from './forgemaster.ts';
 import type { Policy } from './gates.ts';
 import type { Verdict } from './odin-review.ts';
 import { Forge, type Agents } from './orchestrator.ts';
@@ -76,7 +76,7 @@ const waitFor = (pred: (e: ForgeEvent) => boolean, ms = 15_000) =>
     const hit = events.find(pred);
     if (hit) return resolve(hit);
     waiters.push({ pred, resolve });
-    setTimeout(() => reject(new Error('timed out waiting for event')), ms);
+    setTimeout(() => reject(new Error(`timed out waiting for event; last events: ${events.slice(-10).map((e) => e.type + ((e as { state?: string }).state ? ':' + (e as { state?: string }).state : '')).join(', ')}`)), ms);
   });
 
 // ---------------------------------------------------------------- stub agents
@@ -107,7 +107,17 @@ let holdOpen: (() => void) | undefined;
 let holdGate: Promise<void> = Promise.resolve();
 const blocked = (detail: string): SmithOutcome => ({ status: 'blocked', testsPassed: false, summary: detail, blocker: { kind: 'too_big', detail } });
 
+// How the stub Thráin answers a rescope request.
+let rescopeMode: 'swap-queued' | 'stop-running' | 'none' = 'none';
+const rescopeCalls: RescopeInput[] = [];
+
 const stubs: Agents = {
+  rescope: async (input) => {
+    rescopeCalls.push(input);
+    if (rescopeMode === 'none') return { decision: 'none', reason: 'already covered' };
+    if (rescopeMode === 'swap-queued') return { decision: 'change', reason: 'swap t3 for extra', add: [task('extra')], drop: ['t3', 'ghost'] };
+    return { decision: 'change', reason: 'replace the slow one', add: [task('replacement')], drop: ['slowtask'] };
+  },
   triage: async (input) => {
     triageCalls.push({ ...input, qa: [...input.qa] });
     holdOpen?.();
@@ -154,6 +164,12 @@ const stubs: Agents = {
       }
       return done('rebased and resolved');
     }
+    // "hold…" tasks wait at a gate the scenario opens (to keep a smith busy while the plan changes).
+    if (/^hold\d*$/.test(id)) {
+      await holdGate;
+      write(`${id}.txt`, 'ok\n');
+      return done(`did ${id}`);
+    }
     switch (id) {
       case 'blocky':
       case 'qblocky':
@@ -162,10 +178,14 @@ const stubs: Agents = {
         return done(`did ${id}`);
       case 'always-blocked':
         return blocked('still impossible');
-      case 'hold':
-        await holdGate;
-        write('hold.txt', 'ok\n');
-        return done('did hold');
+      case 'slowtask':
+        // Only this task's own stop switch (a rescope) can end it.
+        await new Promise<void>((_, reject) => {
+          const signal = (run.abort ?? run.ledger.abort)?.signal;
+          if (signal?.aborted) return reject(new Error('aborted'));
+          signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+        return stuck('unreachable');
       case 'gatefix':
         write('gatefix.txt', notes.includes('gates failed') ? 'fixed\n' : 'BROKEN\n');
         return done('did gatefix');
@@ -416,6 +436,89 @@ async function main() {
   });
   check('stop while a change waits for your answer: the quest ends cleanly', store.history(1)[0]?.status === 'interrupted' && !evs.some((e) => e.type === 'forge.error'), store.history(1)[0]?.status);
   triageMode = 'rewrite';
+
+  // Rescoping by hand while the crew works: a proposal, your yes, and only what can still be stopped is stopped.
+  const questIdNow = () => (events.findLast((e) => e.type === 'blueprint.approved') as { questId: string }).questId;
+  const proposedChange = (at: number) => waitFor((e) => e.type === 'plan.amended' && e.state === 'proposed' && events.indexOf(e) >= at) as Promise<Extract<ForgeEvent, { type: 'plan.amended' }>>;
+  const rescopeNow = (note: string) => forge.handle({ type: 'quest.rescope', questId: questIdNow(), note });
+
+  rescopeMode = 'swap-queued';
+  rescopeCalls.length = 0;
+  heldGate();
+  evs = await quest([task('hold3'), task('hold4'), task('t3')], () => {
+    void (async () => {
+      await waitFor((e) => e.type === 'task.assigned' && (e as { taskId: string }).taskId === 'hold4');
+      const at = events.length;
+      rescopeNow('swap t3 for something else');
+      const proposal = await proposedChange(at);
+      forge.handle({ type: 'plan.change', changeId: proposal.changeId, approve: true });
+      await waitFor((e) => e.type === 'plan.amended' && e.state === 'applied' && events.indexOf(e) >= at);
+      holdOpen?.();
+    })();
+  });
+  const swap = amended(evs, 'applied').find((e) => e.source === 'rescope');
+  check('rescope: Thráin sees every task and where it stands', rescopeCalls[0]?.tasks.find((t) => t.id === 't3')?.status === 'queued' && rescopeCalls[0].tasks.find((t) => t.id === 'hold3')?.status === 'running' && rescopeCalls[0].note === 'swap t3 for something else');
+  check('rescope: you approve, the queued task is swapped (unknown ids ignored)', swap?.dropped.map((d) => d.id).join() === 't3' && swap.added.map((t) => t.id).join() === 'extra', JSON.stringify(swap?.dropped));
+  check('...the swapped-in task is forged, the dropped one never runs', merged(evs).join() === 'extra,hold3,hold4' && !evs.some((e) => e.type === 'task.assigned' && e.taskId === 't3'), merged(evs).join());
+
+  rescopeMode = 'stop-running';
+  evs = await quest([task('slowtask')], () => {
+    void (async () => {
+      await waitFor((e) => e.type === 'task.assigned' && (e as { taskId: string }).taskId === 'slowtask' && events.indexOf(e) >= events.length - 30);
+      const at = events.length;
+      rescopeNow('drop the slow one');
+      const proposal = await proposedChange(at);
+      forge.handle({ type: 'plan.change', changeId: proposal.changeId, approve: true });
+    })();
+  });
+  const stopProposal = amended(evs, 'proposed').find((e) => e.source === 'rescope');
+  check('rescope: stopping a running task is announced in the proposal', stopProposal?.stopping?.join() === 'slowtask');
+  check('rescope: that smith stops alone, the replacement is forged, no errors', merged(evs).join() === 'replacement' && store.history(1)[0]?.status === 'done' && !evs.some((e) => e.type === 'forge.error'), `${merged(evs).join()} ${store.history(1)[0]?.status}`);
+
+  rescopeMode = 'swap-queued';
+  heldGate();
+  evs = await quest([task('hold5')], () => {
+    void (async () => {
+      await waitFor((e) => e.type === 'task.assigned' && (e as { taskId: string }).taskId === 'hold5' && events.indexOf(e) >= events.length - 30);
+      const at = events.length;
+      rescopeNow('add something');
+      const proposal = await proposedChange(at);
+      forge.handle({ type: 'plan.change', changeId: proposal.changeId, approve: false });
+      await waitFor((e) => e.type === 'plan.amended' && e.state === 'declined' && events.indexOf(e) >= at);
+      holdOpen?.();
+    })();
+  });
+  check('rescope declined: the plan stays as it was', amended(evs, 'declined').length === 1 && merged(evs).join() === 'hold5' && !amended(evs, 'applied').some((e) => e.source === 'rescope'));
+
+  rescopeMode = 'none';
+  rescopeCalls.length = 0;
+  heldGate();
+  evs = await quest([task('hold6')], () => {
+    void (async () => {
+      await waitFor((e) => e.type === 'task.assigned' && (e as { taskId: string }).taskId === 'hold6' && events.indexOf(e) >= events.length - 30);
+      const at = events.length;
+      rescopeNow('already covered?');
+      await waitFor((e) => e.type === 'master.say' && e.text === 'already covered' && events.indexOf(e) >= at);
+      // The cap: four rescopes per quest.
+      for (let i = 0; i < 4; i++) {
+        const before = rescopeCalls.length;
+        rescopeNow(`again ${i}`);
+        await new Promise((r) => setTimeout(r, 150));
+        if (rescopeCalls.length === before) break;
+      }
+      holdOpen?.();
+    })();
+  });
+  check('rescope: "no change needed" is just an answer, no proposal', !amended(evs, 'proposed').length);
+  check('rescope cap: the fifth is refused', rescopeCalls.length === 4, `${rescopeCalls.length} calls`);
+
+  const quiet = events.length;
+  rescopeNow('nothing is running');
+  await new Promise((r) => setTimeout(r, 150));
+  check('rescope with no quest running does nothing', events.length === quiet && rescopeCalls.length === 4);
+  holdOpen = undefined;
+  holdGate = Promise.resolve();
+  rescopeMode = 'none';
 
   // Clarifying questions: Thráin asks, you answer (or tell him to just draft), at most two rounds.
   const nextEvent = async <T extends ForgeEvent['type']>(type: T, from: number) =>

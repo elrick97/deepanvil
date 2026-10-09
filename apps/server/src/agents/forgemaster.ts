@@ -307,6 +307,73 @@ export async function triage(input: TriageInput, repo: string, emit: Emit, ledge
   throw new Error('The Forgemaster returned no usable plan change');
 }
 
+// ---------------------------------------------------------------- rescoping by hand
+
+const RESCOPE = `
+
+The human wants to change the plan while the crew is already working. You see every task and where it stands.
+- Tasks "merged", "in_review" (offered to Odin), "failed" or "replaced" cannot be changed; their work stands.
+- You may drop tasks that are "queued" (not started) or "running" (their smith is stopped and the work so far is discarded),
+  and add 1 to 4 new tasks. Tasks run in parallel on disjoint files, and new tasks build on what is already merged on main.
+- Change as little as the request needs. Drop a running task only when the request really makes it pointless or wrong.
+- If the request needs no change (it is already covered, or it is not about the plan), answer "none" and say why.
+In "reason" say in one or two sentences what changes and why.`;
+
+export interface RescopeInput {
+  request: string;
+  summary: string;
+  tasks: { id: string; title: string; status: string; brief: string }[];
+  note: string;
+}
+
+export type Rescope = { decision: 'none'; reason: string } | { decision: 'change'; reason: string; add: BlueprintTask[]; drop: string[] };
+
+export async function rescope(input: RescopeInput, repo: string, emit: Emit, ledger: Ledger): Promise<Rescope> {
+  const prompt = [
+    `The quest: ${input.request}`,
+    `Blueprint summary: ${input.summary}`,
+    `Tasks and where they stand:\n${input.tasks.map((t) => `- ${t.id} (${t.title}) [${t.status}]: ${t.brief.slice(0, 300)}`).join('\n')}`,
+    `\nThe human asks:\n${input.note.slice(0, 2000)}`,
+    '\nDecide: "change" (what to drop, what to add) or "none".',
+  ].join('\n');
+  const r = await runAgent(
+    {
+      dwarfId: 'thrain',
+      model: MODELS.opus,
+      prompt,
+      options: {
+        cwd: repo,
+        systemPrompt: SYSTEM + RESCOPE,
+        tools: READ_ONLY,
+        allowedTools: READ_ONLY,
+        maxTurns: 15,
+        effort: 'high',
+        outputFormat: {
+          type: 'json_schema',
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['decision', 'reason'],
+            properties: {
+              decision: { type: 'string', enum: ['change', 'none'] },
+              reason: { type: 'string' },
+              add: { type: 'array', maxItems: 4, items: TASK_SCHEMA },
+              drop: { type: 'array', items: { type: 'string' } },
+            },
+          },
+        },
+      },
+    },
+    emit,
+    ledger,
+  );
+  if (r.subtype !== 'success' || !r.structured_output) throw new Error(`The Forgemaster could not rescope the quest (${r.subtype})`);
+  const out = r.structured_output as { decision?: string; reason?: string; add?: BlueprintTask[]; drop?: unknown };
+  const reason = String(out.reason ?? '').slice(0, 400);
+  if (out.decision !== 'change') return { decision: 'none', reason };
+  return { decision: 'change', reason, add: (out.add ?? []).slice(0, 4), drop: (Array.isArray(out.drop) ? out.drop : []).map(String).slice(0, 8) };
+}
+
 /** Re-plan one task after a smith failed it twice. */
 export async function replan(task: BlueprintTask, failureNotes: string, repo: string, emit: Emit, ledger: Ledger): Promise<BlueprintTask> {
   const r = await runAgent(

@@ -62,6 +62,8 @@ const OUTCOME_SCHEMA = {
 const DIGEST_OVER = 6000; // characters of tool output before Pip compresses it
 
 export interface SmithRun {
+  /** This task's own stop switch (a rescope can stop one smith without stopping the quest). */
+  abort?: AbortController;
   smith: Dwarf;
   task: BlueprintTask;
   worktree: string;
@@ -156,6 +158,7 @@ export async function runSmith(run: SmithRun): Promise<SmithOutcome> {
         ...(SANDBOX_READY ? { sandbox: { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false, autoAllowBashIfSandboxed: false } } : {}),
         maxTurns: 60,
         effort: 'medium',
+        ...(run.abort ? { abortController: run.abort } : {}),
         env: { ...process.env, GIT_EDITOR: 'true', GIT_AUTHOR_NAME: smith.name, GIT_AUTHOR_EMAIL: `${smith.id}@deepanvil.local`, GIT_COMMITTER_NAME: smith.name, GIT_COMMITTER_EMAIL: `${smith.id}@deepanvil.local` },
         outputFormat: { type: 'json_schema', schema: OUTCOME_SCHEMA },
         hooks: {

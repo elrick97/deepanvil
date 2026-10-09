@@ -64,7 +64,20 @@ export type ForgeEvent =
    * done (the banner updates); "proposed": it grows the scope, so it waits for your answer
    * (plan.change); "declined": you kept the original plan.
    */
-  | { type: 'plan.amended'; questId: string; changeId: string; state: 'proposed' | 'applied' | 'declined'; reason: string; added: BlueprintTaskView[]; changed: BlueprintTaskView[]; dropped: { id: string; title: string }[] }
+  | {
+      type: 'plan.amended';
+      questId: string;
+      changeId: string;
+      state: 'proposed' | 'applied' | 'declined';
+      /** Who set it off: a blocked smith (default) or your own rescope request. */
+      source?: 'blocked' | 'rescope';
+      reason: string;
+      added: BlueprintTaskView[];
+      changed: BlueprintTaskView[];
+      dropped: { id: string; title: string }[];
+      /** Ids among `dropped` that are in progress: their smith would be stopped. */
+      stopping?: string[];
+    }
   | { type: 'blueprint.proposed'; questId: string; title: string; summary?: string; revision?: number; tasks: BlueprintTaskView[] }
   /** Thráin redrew the blueprint (or you dropped a task): same shape, but not a new quest. */
   | { type: 'blueprint.revised'; questId: string; title: string; summary?: string; revision: number; tasks: BlueprintTaskView[] }
@@ -151,6 +164,8 @@ export type ClientCommand =
   | { type: 'plan.skip'; questId: string }
   /** Your answer to a proposed mid-quest change of plan. */
   | { type: 'plan.change'; changeId: string; approve: boolean }
+  /** Change the plan while it is being forged: Thráin looks at where everything stands and proposes the new cut. */
+  | { type: 'quest.rescope'; questId: string; note: string }
   | { type: 'blueprint.approve'; questId: string }
   /** Ask Thráin for changes; he redraws in the same conversation. */
   | { type: 'blueprint.revise'; questId: string; note: string }
