@@ -170,7 +170,7 @@ function describe(e: ForgeEvent, names: Map<string, string>): string | null {
     case 'blueprint.proposed': return `The Forgemaster drafts: ${e.title}`;
     case 'blueprint.revised': return `Thráin redraws: ${e.title}`;
     case 'plan.amended':
-      if (e.state === 'proposed') return `⚖ Thráin proposes a change of plan: ${e.reason}`;
+      if (e.state === 'proposed') return `⚖ Thráin proposes a ${e.source === 'rescope' ? 're-cut' : 'change of plan'}: ${e.reason}`;
       if (e.state === 'declined') return 'You kept the original plan';
       return `Thráin re-cuts the plan (${[e.added.length && `+${e.added.length}`, e.changed.length && `~${e.changed.length}`, e.dropped.length && `−${e.dropped.length}`].filter(Boolean).join(' ')}): ${e.reason}`;
     case 'blueprint.approved': return 'The forges are lit!';

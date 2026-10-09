@@ -9,6 +9,9 @@ type Send = (cmd: ClientCommand) => boolean;
 
 interface Proposal {
   changeId: string;
+  source: 'blocked' | 'rescope';
+  /** Task ids in progress that this change would stop. */
+  stopping: string[];
   reason: string;
   added: BlueprintTaskView[];
   changed: BlueprintTaskView[];
@@ -28,7 +31,7 @@ export class ChangeCard {
   handle(e: ForgeEvent): void {
     switch (e.type) {
       case 'plan.amended':
-        if (e.state === 'proposed') this.show({ changeId: e.changeId, reason: e.reason, added: e.added, changed: e.changed, dropped: e.dropped });
+        if (e.state === 'proposed') this.show({ changeId: e.changeId, source: e.source ?? 'blocked', stopping: e.stopping ?? [], reason: e.reason, added: e.added, changed: e.changed, dropped: e.dropped });
         else if (this.shown?.changeId === e.changeId) this.hide();
         break;
       case 'forge.status':
@@ -51,7 +54,7 @@ export class ChangeCard {
 
     const head = el('div', 'change-head');
     const label = el('div', 'change-label');
-    label.textContent = 'A smith is blocked · Thráin proposes a change of plan';
+    label.textContent = p.source === 'rescope' ? 'You asked to change the plan · Thráin proposes a re-cut' : 'A smith is blocked · Thráin proposes a change of plan';
     const why = el('div', 'change-why');
     why.textContent = p.reason;
     head.append(label, why);
@@ -59,19 +62,22 @@ export class ChangeCard {
     const diff = el('div', 'change-diff');
     for (const t of p.added) diff.append(row('＋', 'add', t.title, t.brief));
     for (const t of p.changed) diff.append(row('～', 'chg', t.title, t.brief));
-    for (const d of p.dropped) diff.append(row('－', 'del', d.title));
+    for (const d of p.dropped) diff.append(row('－', 'del', d.title, p.stopping.includes(d.id) ? 'in progress: this smith would be stopped and the work so far discarded' : undefined));
 
     const note = el('div', 'change-note');
-    note.textContent = 'This adds work beyond what the blocked task covered, so it needs your word. The other smiths carry on meanwhile.';
+    note.textContent =
+      p.source === 'rescope'
+        ? 'Nothing already merged or with Odin is touched. Say no and the plan stays as it is.'
+        : 'This adds work beyond what the blocked task covered, so it needs your word. The other smiths carry on meanwhile.';
 
     const actions = el('div', 'change-actions');
     const keep = el('button', 'btn');
     keep.type = 'button';
-    keep.textContent = 'Keep the original plan';
+    keep.textContent = p.source === 'rescope' ? 'Keep the plan' : 'Keep the original plan';
     keep.addEventListener('click', () => this.answer(p, false));
     const go = el('button', 'btn btn-primary');
     go.type = 'button';
-    go.textContent = 'Go ahead';
+    go.textContent = p.source === 'rescope' ? 'Re-cut it' : 'Go ahead';
     go.addEventListener('click', () => this.answer(p, true));
     actions.append(keep, go);
 

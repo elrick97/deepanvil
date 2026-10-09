@@ -20,6 +20,8 @@ export class Controls {
   private asks: Ask[] = [];
   private live = false;
   private busy = false;
+  /** The quest is being forged: the composer becomes a way to change the plan. */
+  private forging?: string;
 
   constructor(root: HTMLElement, send: Send, names: Map<string, string>) {
     this.send = send;
@@ -39,7 +41,16 @@ export class Controls {
     this.composer.addEventListener('submit', (ev) => {
       ev.preventDefault();
       const text = this.input.value.trim();
-      if (!text || this.busy) return;
+      if (!text) return;
+      if (this.forging) {
+        // Mid-quest the same box rescopes: Thráin looks at where everything stands and proposes a re-cut.
+        if (this.send({ type: 'quest.rescope', questId: this.forging, note: text })) {
+          this.input.value = '';
+          this.input.blur();
+        }
+        return;
+      }
+      if (this.busy) return;
       if (this.send({ type: 'quest.request', text })) {
         this.input.value = '';
         this.input.blur();
@@ -59,10 +70,16 @@ export class Controls {
 
   private setBusy(busy: boolean): void {
     this.busy = busy;
-    this.input.disabled = busy;
-    this.input.placeholder = busy ? 'The forge is busy…' : 'Ask Thráin for a quest…';
-    // While busy, the send button becomes a stop button.
-    this.composer.querySelector<HTMLElement>('[data-send]')!.hidden = busy;
+    if (!busy) this.forging = undefined;
+    const rescope = busy && !!this.forging;
+    this.input.disabled = busy && !rescope;
+    this.input.placeholder = rescope ? 'Change the plan… e.g. “skip the docs, add a CLI flag”' : busy ? 'The forge is busy…' : 'Ask Thráin for a quest…';
+    this.input.setAttribute('aria-label', rescope ? 'Change the plan for Thráin' : 'Quest for the Forgemaster');
+    // While busy, the send button becomes a stop button; while forging it stays, as the rescope button.
+    const send = this.composer.querySelector<HTMLElement>('[data-send]')!;
+    send.hidden = busy && !rescope;
+    send.textContent = rescope ? '✎' : '⚒';
+    send.setAttribute('aria-label', rescope ? 'Send the change to Thráin' : 'Send quest');
     this.composer.querySelector<HTMLElement>('[data-stop]')!.hidden = !busy;
   }
 
@@ -72,6 +89,11 @@ export class Controls {
         this.live = e.mode === 'live';
         this.composer.hidden = !this.live;
         this.setBusy(e.busy && this.live);
+        break;
+      case 'blueprint.approved':
+        if (!this.live) break;
+        this.forging = e.questId;
+        this.setBusy(this.busy);
         break;
       case 'permission.request':
         if (!this.live) break;
