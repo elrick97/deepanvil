@@ -3,7 +3,7 @@
 // Exercises every path that's rare in real life.
 // Run inside WSL: bash scripts/server.sh selftest
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ForgeEvent, PlanQuestion } from '@deepanvil/shared';
@@ -13,6 +13,7 @@ import type { Policy } from './gates.ts';
 import type { Verdict } from './odin-review.ts';
 import { Forge, type Agents } from './orchestrator.ts';
 import { runGate } from './gates.ts';
+import { cloneTarget } from './git.ts';
 import { judge } from './permissions.ts';
 import { Ledger, waitForRest } from './run.ts';
 import type { SmithOutcome, SmithRun } from './smith.ts';
@@ -644,6 +645,84 @@ async function main() {
   forge.handle({ type: 'blueprint.approve', questId: bp.questId });
   await waitFor((e) => e.type === 'forge.status' && !e.busy && events.indexOf(e) > events.indexOf(slowStart), 30_000);
   check('...and it forges normally afterwards', merged(events.slice(from)).join() === 'steady', merged(events.slice(from)).join());
+
+  // Projects: add by path (validated), switch only when idle, a repo whose branch is not "main", history per project.
+  const errorFor = async (cmd: Parameters<typeof forge.handle>[0]) => {
+    const at = events.length;
+    forge.handle(cmd);
+    return ((await waitFor((e) => e.type === 'forge.error' && events.indexOf(e) >= at)) as { message: string }).message;
+  };
+  const mkRepo = (name: string, branch: string, commit = true) => {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    sh(dir, 'init', '-q', '-b', branch);
+    sh(dir, 'config', 'user.name', 't');
+    sh(dir, 'config', 'user.email', 't@t');
+    if (commit) {
+      writeFileSync(join(dir, 'README.md'), `# ${name}\n`);
+      sh(dir, 'add', '-A');
+      sh(dir, 'commit', '-q', '-m', 'init');
+    }
+    return dir;
+  };
+  const lastProjects = () => (events.findLast((e) => e.type === 'projects') as Extract<ForgeEvent, { type: 'projects' }>).projects;
+  const trunkRepo = mkRepo('trunk-repo', 'trunk');
+  const emptyRepo = mkRepo('empty-repo', 'main', false);
+  const detached = mkRepo('detached-repo', 'main');
+  sh(detached, 'checkout', '-q', '--detach');
+  const plain = join(root, 'plain-folder');
+  mkdirSync(plain);
+
+  check('projects: the starting repo is listed and active', lastProjects().length === 1 && lastProjects()[0]!.active && lastProjects()[0]!.path === realpathSync(repo));
+  check('projects: a relative path is refused', (await errorFor({ type: 'project.add', path: 'some/where' })).includes('absolute'));
+  check('projects: a Windows path is refused with a hint', (await errorFor({ type: 'project.add', path: 'C:\\Users\\me\\proj' })).includes('WSL'));
+  check('projects: a missing folder is refused', (await errorFor({ type: 'project.add', path: join(root, 'nope') })).includes('no folder'));
+  check('projects: a folder that is not a repository is refused', (await errorFor({ type: 'project.add', path: plain })).includes('not a git repository'));
+  check('projects: a repository without commits is refused', (await errorFor({ type: 'project.add', path: emptyRepo })).includes('no commits'));
+  check('projects: a detached HEAD is refused', (await errorFor({ type: 'project.add', path: detached })).includes('detached'));
+  check('projects: only https clone URLs are accepted', (await errorFor({ type: 'project.clone', url: 'file:///etc' })).includes('https'));
+  check('projects: clone URL names and rejections', cloneTarget('https://github.com/o/r.git', '/p').name === 'r' && cloneTarget('https://github.com/o/r.git', '/p').dir === '/p/r' && ['ssh://git@github.com/o/r', 'http://github.com/o/r', 'https://x.com/../etc', 'git@github.com:o/r', 'https://github.com/o/r; rm -rf ~', '--upload-pack=x'].every((u) => !(() => { try { cloneTarget(u, '/p'); return true; } catch { return false; } })()));
+
+  // Adding a subfolder adds its repository; being idle, the forge turns to it.
+  mkdirSync(join(trunkRepo, 'sub'));
+  const addAt = events.length;
+  forge.handle({ type: 'project.add', path: join(trunkRepo, 'sub') });
+  await waitFor((e) => e.type === 'forge.status' && e.repo === realpathSync(trunkRepo) && events.indexOf(e) >= addAt);
+  check('projects: adding a subfolder adds the repository and switches to it', lastProjects().length === 2 && lastProjects().find((p) => p.active)?.path === realpathSync(trunkRepo));
+  check('projects: not the sandbox, so Odin will ask before merging', lastProjects().find((p) => p.active)?.sandbox === false);
+
+  // A repo on a branch called "trunk": Odin keeps that branch, not "main".
+  evs = await quest([task('projA')]);
+  check('a project whose branch is not main: the piece merges into that branch', merged(evs).join() === 'projA' && shOk(trunkRepo, 'cat-file', '-e', 'trunk:projA.txt') && sh(trunkRepo, 'log', '--oneline', 'trunk').includes('projA'), merged(evs).join());
+  check('...and the quest belongs to that project only', store.history(30, realpathSync(trunkRepo)).length === 1 && !store.history(30, realpathSync(repo)).some((q) => q.title === 'Test quest' && q.merged === 1 && q.id === store.history(30, realpathSync(trunkRepo))[0]!.id));
+  const vaultAt2 = events.length;
+  forge.handle({ type: 'vault.open' });
+  const trunkVault = (await waitFor((e) => e.type === 'vault.info' && events.indexOf(e) >= vaultAt2)) as Extract<ForgeEvent, { type: 'vault.info' }>;
+  check('...the vault panel shows that project', trunkVault.info.repo === 'trunk-repo' && trunkVault.info.policy.mode === 'approve' && trunkVault.info.recent[0]?.taskId === 'projA');
+
+  // Switching is refused while a quest runs; adding is allowed but does not switch.
+  evs = await quest([task('slow')], () => {
+    void (async () => {
+      await waitFor((e) => e.type === 'task.assigned' && (e as { taskId: string }).taskId === 'slow' && events.indexOf(e) >= events.length - 30);
+      const refusal = await errorFor({ type: 'project.switch', path: realpathSync(repo) });
+      check('projects: switching mid-quest is refused', refusal.includes('Finish or stop'));
+      const other = mkRepo('late-repo', 'main');
+      forge.handle({ type: 'project.add', path: other });
+      await waitFor((e) => e.type === 'projects' && e.projects.some((pr) => pr.name === 'late-repo') && events.indexOf(e) >= events.length - 30);
+      forge.handle({ type: 'quest.abort' });
+    })();
+  });
+  check('projects: adding mid-quest lists the project without switching', lastProjects().some((pr) => pr.name === 'late-repo') && lastProjects().find((pr) => pr.active)?.path === realpathSync(trunkRepo));
+
+  // Back to the first project; forgetting works, but not on the active one.
+  const backAt = events.length;
+  forge.handle({ type: 'project.switch', path: realpathSync(repo) });
+  await waitFor((e) => e.type === 'forge.status' && e.repo === realpathSync(repo) && events.indexOf(e) >= backAt);
+  check('projects: switching back works', lastProjects().find((pr) => pr.active)?.path === realpathSync(repo));
+  check('projects: the active project cannot be forgotten', (await errorFor({ type: 'project.forget', path: realpathSync(repo) })).includes('switch to another'));
+  forge.handle({ type: 'project.forget', path: realpathSync(trunkRepo) });
+  check('projects: a forgotten project leaves the list (its files stay)', !lastProjects().some((pr) => pr.path === realpathSync(trunkRepo)) && existsSync(trunkRepo));
+  check('projects: an unknown project cannot be switched to', (await errorFor({ type: 'project.switch', path: realpathSync(trunkRepo) })).includes('not on the list'));
 
   // Restart recovery: a proposed blueprint survives a restart.
   blueprintTasks = [task('later')];

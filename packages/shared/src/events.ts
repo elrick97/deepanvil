@@ -108,6 +108,7 @@ export type ForgeEvent =
   | { type: 'history'; quests: QuestSummary[] }
   | { type: 'quest.detail'; detail: QuestDetail }
   | { type: 'vault.info'; info: VaultInfo }
+  | { type: 'projects'; projects: ProjectInfo[] }
   | { type: 'push.config'; publicKey: string }
   // --- Odin, keeper of the Vault of Main (docs/ODIN.md)
   | { type: 'offering.opened'; offeringId: string; questId: string; taskId: string; dwarfId: string; title: string; revision: number; lines: number }
@@ -182,6 +183,18 @@ export interface VaultInfo {
   }[];
 }
 
+/** A repository the forge can work on (the project picker). */
+export interface ProjectInfo {
+  path: string;
+  name: string;
+  active: boolean;
+  /** Quests run on it so far. */
+  quests: number;
+  lastUsed?: number;
+  /** The practice sandbox: the only project that defaults to auto-merge. */
+  sandbox: boolean;
+}
+
 /** One line of the quest log (newest first). */
 export interface QuestSummary {
   id: string;
@@ -222,6 +235,14 @@ export type ClientCommand =
   | { type: 'history.open'; questId: string }
   /** Open the vault panel: Odin's policy and the latest offerings. */
   | { type: 'vault.open' }
+  /** Add a repository by its path as the forge (WSL) sees it, and switch to it when idle. */
+  | { type: 'project.add'; path: string }
+  /** Clone an https:// repository into the forge's projects folder, then switch to it. */
+  | { type: 'project.clone'; url: string }
+  /** Work on another known project (only while no quest is running). */
+  | { type: 'project.switch'; path: string }
+  /** Take a project off the list (its files are never touched). */
+  | { type: 'project.forget'; path: string }
   | { type: 'permission.answer'; requestId: string; approved: boolean }
   | { type: 'offering.merge'; offeringId: string }
   | { type: 'offering.send_back'; offeringId: string; note?: string }

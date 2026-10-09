@@ -32,6 +32,8 @@ export type Outcome =
 
 export interface OdinDeps {
   repo: string;
+  /** The branch Odin keeps: the one checked out in the repo, which finished work is merged into. */
+  base: string;
   store: Store;
   emit: Emit;
   ledger: Ledger;
@@ -86,7 +88,7 @@ export class Odin {
 
   /** A clean detached checkout of main for Odin's own work. */
   private async scratchAt(ref: string): Promise<void> {
-    if (!existsSync(this.scratch)) await git(this.d.repo, 'worktree', 'add', '--detach', this.scratch, 'main');
+    if (!existsSync(this.scratch)) await git(this.d.repo, 'worktree', 'add', '--detach', this.scratch, this.d.base);
     await git(this.scratch, 'rebase', '--abort').catch(() => undefined);
     await git(this.scratch, 'reset', '--hard', '-q');
     await git(this.scratch, 'clean', '-fdq');
@@ -141,7 +143,7 @@ export class Odin {
     await this.scratchAt(o.branch);
     try {
       // Odin is the committer of rebased commits (authors are kept); works without a git identity.
-      await git(this.scratch, '-c', 'user.name=Odin (Deepanvil)', '-c', 'user.email=odin@deepanvil.local', 'rebase', '-q', 'main');
+      await git(this.scratch, '-c', 'user.name=Odin (Deepanvil)', '-c', 'user.email=odin@deepanvil.local', 'rebase', '-q', this.d.base);
     } catch {
       await git(this.scratch, 'rebase', '--abort').catch(() => undefined);
       return this.sendBack(
@@ -154,7 +156,7 @@ export class Odin {
     const head = await git(this.scratch, 'rev-parse', 'HEAD');
 
     // 2. Size: well-scoped work only (lockfiles don't count).
-    const numstat = await git(this.scratch, 'diff', '--numstat', 'main', 'HEAD');
+    const numstat = await git(this.scratch, 'diff', '--numstat', this.d.base, 'HEAD');
     let lines = 0;
     const files: string[] = [];
     for (const row of numstat.split('\n').filter(Boolean)) {
@@ -209,7 +211,7 @@ export class Odin {
 
     // 4. Review the real diff (Sonnet, always).
     this.state(o, 'reviewing');
-    const diff = await git(this.scratch, 'diff', 'main', 'HEAD');
+    const diff = await git(this.scratch, 'diff', this.d.base, 'HEAD');
     this.diffs.set(o.id, diff);
     const verdict = await this.d.reviewer(o.task, diff.slice(0, 150_000), ran.join(', ') || 'no gates configured', this.d.emit, this.d.ledger);
     if (this.abort.signal.aborted) return { kind: 'abandoned' };
@@ -235,6 +237,9 @@ export class Odin {
     }
 
     // Fast-forward main to exactly the commit that passed. The tested tree is what lands.
+    // The merge goes into whatever branch the checkout is on: make sure that is the one Odin keeps.
+    const onBranch = await git(this.d.repo, 'symbolic-ref', '--short', 'HEAD').catch(() => '');
+    if (onBranch !== this.d.base) throw new Error(`The checkout is on “${onBranch || 'a detached HEAD'}”, not “${this.d.base}”: switch it back so Odin can merge.`);
     await git(this.d.repo, 'merge', '--ff-only', '-q', head);
     this.state(o, 'merged');
     this.d.emit({ type: 'offering.merged', offeringId: o.id, sha: head });
@@ -252,15 +257,17 @@ export class Odin {
   checkHealth(): Promise<void> {
     const run = this.queue.then(async () => {
       if (!existsSync(this.d.repo)) return;
-      const sha = await git(this.d.repo, 'rev-parse', 'main').catch(() => '');
+      const sha = await git(this.d.repo, 'rev-parse', this.d.base).catch(() => '');
       const gates = GATES.filter((g) => this.d.policy.gates[g]);
       if (!sha || !gates.length) return this.setHealth('unknown', sha);
-      await this.scratchAt('main');
+      await this.scratchAt(this.d.base);
       const failing: GateName[] = [];
       for (const g of gates) {
         const r = await runGate(this.d.policy.gates[g]!, this.scratch, this.d.policy.gateTimeoutSec, this.abort.signal);
         if (!r.ok) failing.push(g);
       }
+      // Stopped (the forge turned to another project): say nothing about a repo we no longer keep.
+      if (this.abort.signal.aborted) return;
       this.setHealth(failing.length ? 'red' : 'green', sha, failing);
       if (failing.length) this.say(`The vault is cracked: ${failing.join(' and ')} fail on main. Only work that mends it may enter.`);
     });

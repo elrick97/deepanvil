@@ -92,6 +92,16 @@ export class Store {
         json TEXT NOT NULL,
         created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS projects (
+        path TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        added_at INTEGER NOT NULL,
+        last_used INTEGER
+      );
+      CREATE TABLE IF NOT EXISTS settings (
+        k TEXT PRIMARY KEY,
+        v TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS crew (
         dwarf_id TEXT PRIMARY KEY,
         tasks_done INTEGER DEFAULT 0,
@@ -100,6 +110,40 @@ export class Store {
         bells INTEGER DEFAULT 0
       );
     `);
+  }
+
+  // ------------------------------------------------------------------ projects & settings
+
+  getSetting(key: string): string | undefined {
+    return (this.db.prepare('SELECT v FROM settings WHERE k = ?').get(key) as { v: string } | undefined)?.v;
+  }
+
+  setSetting(key: string, value: string): void {
+    this.db.prepare('INSERT INTO settings (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v').run(key, value);
+  }
+
+  /** Remember a repository (no-op if known). */
+  upsertProject(path: string, name: string): void {
+    this.db.prepare('INSERT INTO projects (path, name, added_at) VALUES (?, ?, ?) ON CONFLICT (path) DO UPDATE SET name = excluded.name').run(path, name, Date.now());
+  }
+
+  touchProject(path: string): void {
+    this.db.prepare('UPDATE projects SET last_used = ? WHERE path = ?').run(Date.now(), path);
+  }
+
+  forgetProject(path: string): void {
+    this.db.prepare('DELETE FROM projects WHERE path = ?').run(path);
+  }
+
+  /** Known projects, most recently used first, with how many quests each has had. */
+  listProjects(): { path: string; name: string; quests: number; lastUsed?: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT p.path, p.name, p.last_used, p.added_at, (SELECT COUNT(*) FROM quests q WHERE q.repo = p.path) AS quests
+         FROM projects p ORDER BY COALESCE(p.last_used, p.added_at) DESC`,
+      )
+      .all() as { path: string; name: string; last_used: number | null; added_at: number; quests: number }[];
+    return rows.map((r) => ({ path: r.path, name: r.name, quests: r.quests, ...(r.last_used ? { lastUsed: r.last_used } : {}) }));
   }
 
   // ------------------------------------------------------------------ quests
@@ -125,8 +169,8 @@ export class Store {
   }
 
   /** The blueprint still waiting for approval, if the forge restarted mid-decision. */
-  pendingQuest(): { id: string; request: string; blueprint: unknown } | undefined {
-    const row = this.db.prepare("SELECT id, request, blueprint FROM quests WHERE status = 'proposed' ORDER BY created_at DESC LIMIT 1").get() as
+  pendingQuest(repo?: string): { id: string; request: string; blueprint: unknown } | undefined {
+    const row = this.db.prepare(`SELECT id, request, blueprint FROM quests WHERE status = 'proposed'${repo ? ' AND repo = ?' : ''} ORDER BY created_at DESC LIMIT 1`).get(...(repo ? [repo] : [])) as
       | { id: string; request: string; blueprint: string }
       | undefined;
     return row && { id: row.id, request: row.request, blueprint: JSON.parse(row.blueprint) };
@@ -140,14 +184,14 @@ export class Store {
     return rows.map((r) => r.id);
   }
 
-  history(limit = 30): QuestSummary[] {
+  history(limit = 30, repo?: string): QuestSummary[] {
     const rows = this.db
       .prepare(
         `SELECT q.id, q.title, q.request, q.status, q.created_at, q.merged, q.failed,
                 COALESCE((SELECT SUM(cost_usd) FROM spend s WHERE s.quest_id = q.id), 0) AS cost
-         FROM quests q ORDER BY q.created_at DESC LIMIT ?`,
+         FROM quests q${repo ? ' WHERE q.repo = ?' : ''} ORDER BY q.created_at DESC LIMIT ?`,
       )
-      .all(limit) as { id: string; title: string | null; request: string; status: string; created_at: number; merged: number; failed: number; cost: number }[];
+      .all(...(repo ? [repo, limit] : [limit])) as { id: string; title: string | null; request: string; status: string; created_at: number; merged: number; failed: number; cost: number }[];
     return rows.map((r) => ({
       id: r.id,
       title: r.title ?? r.request.slice(0, 60),

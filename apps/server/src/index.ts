@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { createServer, type IncomingMessage } from 'node:http';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -14,7 +15,7 @@ import { Store } from './store.ts';
 const PORT = Number(process.env.PORT ?? 8787);
 // MOCK=1 plays the quest simulator; otherwise the forge is live and idles until you ask.
 const MOCK = process.env.MOCK === '1';
-const REPO = process.env.DEEPANVIL_REPO ?? join(homedir(), 'deepanvil', 'forge', 'sandbox');
+const SANDBOX_REPO = join(homedir(), 'deepanvil', 'forge', 'sandbox');
 const SMITHS = Number(process.env.DEEPANVIL_SMITHS ?? 2);
 
 let seq = 0;
@@ -39,7 +40,7 @@ const transcripts = new Map<string, string[]>();
 const todos = new Map<string, string>();
 // Latest gauges, so a phone that connects later sees the treasury and limits at once.
 const latest = new Map<string, string>();
-const GAUGES = new Set<ForgeEvent['type']>(['limits', 'ledger', 'forge.status', 'history', 'vault.health', 'forge.rest']);
+const GAUGES = new Set<ForgeEvent['type']>(['limits', 'ledger', 'forge.status', 'history', 'vault.health', 'forge.rest', 'projects']);
 
 function envelope(event: ForgeEvent): string {
   const env: Envelope = { seq: ++seq, at: Date.now(), event };
@@ -47,6 +48,9 @@ function envelope(event: ForgeEvent): string {
 }
 
 const store = MOCK ? undefined : new Store();
+// The project we work on: DEEPANVIL_REPO if set, else the one you last switched to (if it still exists), else the sandbox.
+const saved = store?.getSetting('activeProject');
+const REPO = process.env.DEEPANVIL_REPO ?? (saved && existsSync(saved) ? saved : SANDBOX_REPO);
 const pusher = store ? new Pusher(store) : undefined;
 
 export function broadcast(event: ForgeEvent): void {
@@ -148,8 +152,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => clients.delete(ws));
 });
 
-const SANDBOX_REPO = join(homedir(), 'deepanvil', 'forge', 'sandbox');
-const forge = store ? new Forge(broadcast, { repo: REPO, smiths: SMITHS, defaultMode: REPO === SANDBOX_REPO ? 'auto' : 'approve' }, store) : undefined;
+const forge = store ? new Forge(broadcast, { repo: REPO, smiths: SMITHS, defaultMode: REPO === SANDBOX_REPO ? 'auto' : 'approve', sandboxRepo: SANDBOX_REPO }, store) : undefined;
 
 http.listen(PORT, () => {
   console.log(`[deepanvil] forge listening on :${PORT} (${process.platform}, node ${process.version})`);

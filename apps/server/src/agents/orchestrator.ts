@@ -1,9 +1,12 @@
 import { existsSync } from 'node:fs';
+import { mkdir, rm } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { basename, join } from 'node:path';
 import { CREW, type BlueprintTaskView, type ClientCommand, type Dwarf, type ForgeEvent, type PlanAnswer, type PlanQuestion } from '@deepanvil/shared';
 import type { Store } from '../store.ts';
 import { plan, replan, rescope, triage, type Blueprint, type BlueprintTask, type QA } from './forgemaster.ts';
 import { policyFor } from './gates.ts';
-import { addWorktree, commitAll, git, removeWorktree, worktreesDir } from './git.ts';
+import { addWorktree, cloneInto, cloneTarget, commitAll, git, inspectRepo, removeWorktree, worktreesDir } from './git.ts';
 import { linkDependencies, Odin } from './odin.ts';
 import { sonnetReview, type Reviewer } from './odin-review.ts';
 import { Ledger, type Emit } from './run.ts';
@@ -23,6 +26,10 @@ export interface ForgeConfig {
   smiths: number;
   /** Odin's merge mode for a repo seen for the first time: "auto" for the sandbox. */
   defaultMode?: 'auto' | 'approve';
+  /** The practice sandbox: the only project that defaults to auto-merge. */
+  sandboxRepo?: string;
+  /** Where cloned projects go (default ~/deepanvil/projects). */
+  projectsDir?: string;
 }
 
 /** The model-backed steps, injectable so the orchestration can be tested without tokens. */
@@ -122,6 +129,10 @@ export class Forge {
   private busy = false;
   private pending?: PendingQuest;
   private draft?: Draft;
+  /** The branch Odin keeps in the current project: the one checked out there. */
+  private base = 'main';
+  /** A project switch or clone is under way: no quest may start. */
+  private switching = false;
   private run?: QuestRun;
   /** A question Thráin asked mid-quest (the form is the same as at drafting). */
   private midAsk?: { questions: PlanQuestion[]; questId: string; resolve: (a: Record<string, PlanAnswer> | undefined) => void };
@@ -146,6 +157,7 @@ export class Forge {
   get odin(): Odin {
     this.keeper ??= new Odin({
       repo: this.cfg.repo,
+      base: this.base,
       store: this.store,
       emit: this.emit,
       ledger: this.ledger,
@@ -158,11 +170,19 @@ export class Forge {
 
   /** After a restart: retire quests whose agents died, clear their anvils, re-offer a pending blueprint. */
   async recover(): Promise<void> {
+    // Which branch does Odin keep in this repo? The one it has checked out.
+    const info = existsSync(this.cfg.repo) ? await inspectRepo(this.cfg.repo).catch(() => undefined) : undefined;
+    if (info) {
+      this.cfg.repo = info.root;
+      this.base = info.branch;
+    }
+    this.store.upsertProject(this.cfg.repo, basename(this.cfg.repo));
+    if (info) this.store.touchProject(this.cfg.repo);
     this.store.abandonOpenOfferings();
     const lost = this.store.interruptUnfinished();
     if (lost.length) this.say(`The forge went cold mid-quest; ${lost.length} quest(s) were interrupted. Their branches are kept.`);
     await this.clearAnvils();
-    const pending = this.store.pendingQuest();
+    const pending = this.store.pendingQuest(this.cfg.repo);
     if (pending) {
       const blueprint = pending.blueprint as Blueprint;
       this.pending = { id: pending.id, request: pending.request, blueprint, revision: 0, notes: '', qa: [] };
@@ -172,6 +192,7 @@ export class Forge {
     this.emit(this.status());
     this.emit(this.ledger.event());
     this.history();
+    this.emitProjects();
     if (existsSync(this.cfg.repo)) void this.odin.checkHealth();
   }
 
@@ -187,7 +208,102 @@ export class Forge {
   }
 
   private history(): void {
-    this.emit({ type: 'history', quests: this.store.history() });
+    this.emit({ type: 'history', quests: this.store.history(30, this.cfg.repo) });
+  }
+
+  // ------------------------------------------------------------------ projects
+
+  private emitProjects(): void {
+    this.emit({
+      type: 'projects',
+      projects: this.store.listProjects().map((p) => ({ ...p, active: p.path === this.cfg.repo, sandbox: p.path === this.cfg.sandboxRepo })),
+    });
+  }
+
+  /** No quest is running, drafting, waiting on you, or being set up: safe to change projects. */
+  private idle(): boolean {
+    return !this.busy && !this.pending && !this.draft && !this.run && !this.activeQuest && !this.switching;
+  }
+
+  /** Add a repository by path (it must be a git repo with a commit and a branch) and switch to it if idle. */
+  private async addProject(input: string): Promise<void> {
+    try {
+      const { root, branch } = await inspectRepo(input);
+      this.store.upsertProject(root, basename(root));
+      this.emitProjects();
+      this.say(`${basename(root)} joins the forge (I will keep its “${branch}” branch).`);
+      if (this.idle()) await this.switchProject(root);
+      else this.say('I will turn to it once this quest is done: pick it from the list then.');
+    } catch (err) {
+      this.fail(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  /** Clone an https repository into the projects folder, add it, and switch to it. */
+  private async cloneProject(url: string): Promise<void> {
+    if (!this.idle()) return this.fail('Finish or stop the current quest before adding a project.');
+    let target;
+    try {
+      target = cloneTarget(url, this.cfg.projectsDir ?? join(homedir(), 'deepanvil', 'projects'));
+    } catch (err) {
+      return this.fail(err instanceof Error ? err.message : String(err));
+    }
+    // Never write over an existing folder.
+    let dir = target.dir;
+    for (let n = 2; existsSync(dir); n++) dir = `${target.dir}-${n}`;
+    this.switching = true;
+    this.setBusy(true);
+    this.say(`Fetching ${target.name}…`);
+    let root: string | undefined;
+    try {
+      await mkdir(join(dir, '..'), { recursive: true });
+      await cloneInto(target.url, dir);
+      const info = await inspectRepo(dir);
+      root = info.root;
+      this.store.upsertProject(root, basename(root));
+      this.emitProjects();
+    } catch (err) {
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      this.fail(`Could not clone ${target.url}: ${err instanceof Error ? err.message.split('\n')[0] : String(err)}`);
+    } finally {
+      this.switching = false;
+      this.setBusy(false);
+    }
+    if (root) await this.switchProject(root);
+  }
+
+  /** Turn the forge to another known project: its history, its policy, its Odin. Only while idle. */
+  private async switchProject(path: string): Promise<void> {
+    if (!this.idle()) return this.fail('Finish or stop the current quest first, then switch projects.');
+    if (path === this.cfg.repo) return;
+    if (!this.store.listProjects().some((p) => p.path === path)) return this.fail('That project is not on the list.');
+    this.switching = true;
+    try {
+      const { root, branch } = await inspectRepo(path);
+      this.keeper?.stop();
+      this.keeper = undefined;
+      this.cfg.repo = root;
+      this.base = branch;
+      this.cfg.defaultMode = root === this.cfg.sandboxRepo ? 'auto' : 'approve';
+      this.store.touchProject(root);
+      this.store.setSetting('activeProject', root);
+      await this.clearAnvils();
+      this.emit(this.status());
+      this.history();
+      this.emitProjects();
+      this.say(`We turn to ${basename(root)}.`);
+      void this.odin.checkHealth();
+    } catch (err) {
+      this.fail(err instanceof Error ? err.message : String(err));
+    } finally {
+      this.switching = false;
+    }
+  }
+
+  private forgetProject(path: string): void {
+    if (path === this.cfg.repo) return this.fail('That is the project we are working on: switch to another one first.');
+    this.store.forgetProject(path);
+    this.emitProjects();
   }
 
   status() {
@@ -207,6 +323,18 @@ export class Forge {
         break;
       case 'plan.change':
         this.changeWaits.get(cmd.changeId)?.(cmd.approve === true);
+        break;
+      case 'project.add':
+        void this.addProject(String(cmd.path ?? ''));
+        break;
+      case 'project.clone':
+        void this.cloneProject(String(cmd.url ?? ''));
+        break;
+      case 'project.switch':
+        void this.switchProject(String(cmd.path ?? ''));
+        break;
+      case 'project.forget':
+        this.forgetProject(String(cmd.path ?? ''));
         break;
       case 'vault.open': {
         const p = this.odin.policy;
@@ -317,7 +445,7 @@ export class Forge {
   // ------------------------------------------------------------------ drafting
 
   private async request(text: string): Promise<void> {
-    if (this.busy) return this.fail('a quest is already underway — one at a time.');
+    if (this.busy || this.switching) return this.fail('a quest is already underway — one at a time.');
     if (!existsSync(this.cfg.repo)) return this.fail(`no repository at ${this.cfg.repo} (run scripts/setup-sandbox.sh or set DEEPANVIL_REPO).`);
     const dirty = await git(this.cfg.repo, 'status', '--porcelain').catch(() => 'x');
     if (dirty) return this.fail(`${this.cfg.repo} has uncommitted changes; commit or stash them first.`);
