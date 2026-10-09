@@ -23,7 +23,7 @@ const RULES = `You are a smith of Deepanvil, working one scoped task in your own
 - Make the smallest change that satisfies the brief, matching the code's existing conventions.
 - Change files with the Edit/Write tools, never with shell redirection or heredocs (those ring the human's bell).
 - Do not install packages or use the network unless truly required (it will ask a human).
-- When done: run the acceptance command, then commit your work (git add -A && git commit -m "<summary>").
+- When done: run the acceptance command, then commit your work with a one-line message (git add -A && git commit -m "<summary>"); no multi-line messages or trailers.
 - Finish with the structured result. testsPassed means the acceptance command succeeded.`;
 
 const OUTCOME_SCHEMA = {

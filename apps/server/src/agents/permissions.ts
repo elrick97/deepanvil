@@ -32,6 +32,12 @@ function inside(dir: string, path: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
+// fd merges (2>&1) and /dev/null redirects are harmless; drop them so their `&` / `>` / path
+// don't read as separators, file writes or paths outside the anvil.
+function stripSafeRedirects(command: string): string {
+  return command.replace(/\d?>&\d(?!\w)/g, ' ').replace(/\d?>\s*\/dev\/null(?!\w)/g, ' ');
+}
+
 function splitShell(command: string): string[] {
   return command
     .split(/&&|\|\||;|\||&|\n/)
@@ -58,9 +64,13 @@ export function judge(tool: string, input: Record<string, unknown>, worktree: st
     // Substitutions and variables can hide anything ($(…), `…`, $HOME); paths that leave the
     // anvil (/abs, ~, ..) need a human. No exemptions: git can write files too (--output=).
     const ask = { kind: 'ask' as const, action: `run \`${command.slice(0, 120)}\`` };
-    if (/\$[({\w]|`/.test(command)) return ask;
-    if (/(^|[\s>=<'"])(\/|~|\.\.(\/|\s|$))/.test(command.replace(/(^|\s)\.\/\S*/g, ' '))) return ask;
-    const segments = splitShell(command);
+    const plain = stripSafeRedirects(command);
+    if (/\$[({\w]|`/.test(plain)) return ask;
+    if (/(^|[\s>=<'"])(\/|~|\.\.(\/|\s|$))/.test(plain.replace(/(^|\s)\.\/\S*/g, ' '))) return ask;
+    // Any other redirect writes a file through the shell (smiths use Edit/Write for that).
+    // Quoted text (a commit message with <email@x.y>) is not a redirect.
+    if (/[<>]/.test(plain.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""'))) return ask;
+    const segments = splitShell(plain);
     if (segments.length && segments.every((s) => SAFE_COMMANDS.some((r) => r.test(s)))) return { kind: 'allow' };
     return { kind: 'ask', action: `run \`${command.slice(0, 120)}\`` };
   }

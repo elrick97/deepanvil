@@ -54,10 +54,12 @@ export function log(emit: Emit, dwarfId: string, kind: LogEntry['kind'], text: s
   emit({ type: 'dwarf.log', dwarfId, entry: { at: Date.now(), kind, text: text.length > LOG_MAX ? `${text.slice(0, LOG_MAX)}…` : text } });
 }
 
-function describeTool(name: string, input: unknown): string {
+function describeTool(name: string, input: unknown, cwd?: string): string {
   const i = (input ?? {}) as Record<string, unknown>;
-  const detail = i.command ?? i.file_path ?? i.pattern ?? i.path ?? i.url ?? '';
-  return detail ? `${name}: ${String(detail)}` : name;
+  const detail = String(i.command ?? i.file_path ?? i.pattern ?? i.path ?? i.url ?? '');
+  // Paths inside the agent's own worktree read better relative to it.
+  const short = cwd ? detail.split(`${cwd}/`).join('') : detail;
+  return short ? `${name}: ${short}` : name;
 }
 
 export interface RunSpec {
@@ -91,7 +93,7 @@ export async function runAgent(spec: RunSpec, emit: Emit, ledger: Ledger): Promi
       // The live transcript: what the agent says and which tools it calls (results come from hooks).
       for (const block of Array.isArray(m.content) ? m.content : []) {
         if (block.type === 'text' && block.text.trim()) log(emit, spec.dwarfId, 'say', block.text);
-        else if (block.type === 'tool_use') log(emit, spec.dwarfId, 'tool', describeTool(block.name, block.input));
+        else if (block.type === 'tool_use') log(emit, spec.dwarfId, 'tool', describeTool(block.name, block.input, spec.options.cwd));
       }
       // One API response can arrive as several messages; count its usage once.
       if (seen.has(m.id)) continue;
