@@ -112,8 +112,8 @@ export class Hud {
     this.backend.textContent = `${name} · ${tier}`;
   }
 
-  setFps(fps: number, dpr: number): void {
-    this.fps.textContent = `${fps} fps · ${dpr.toFixed(2)}x`;
+  setFps(fps: number, dpr: number, calm = false): void {
+    this.fps.textContent = `${fps} fps · ${dpr.toFixed(2)}x${calm ? ' · calm' : ''}`;
   }
 
   log(event: ForgeEvent, names: Map<string, string>): void {

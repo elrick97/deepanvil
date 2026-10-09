@@ -196,11 +196,29 @@ setInterval(() => {
 }, 1000);
 link.connect();
 
+// Calm mode: with no events and no input for a while the hall idles at 30 fps (battery, fans).
+// Any event that isn't just a gauge refresh, or any touch/key/wheel, brings back full rate.
+const CALM_AFTER = 25_000;
+const CALM_FRAME = 1 / 30 - 0.002;
+const QUIET = new Set<ForgeEvent['type']>(['hello', 'limits', 'ledger', 'forge.status', 'history', 'vault.health', 'push.config']);
+let lastActive = performance.now();
+const wake = (): void => {
+  lastActive = performance.now();
+};
+for (const type of ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart']) addEventListener(type, wake, { passive: true });
+link.on((e) => {
+  if (!QUIET.has(e.type)) wake();
+});
 const clock = new THREE.Timer();
 let hudTimer = 0;
+let owed = 0; // time since the last frame we actually drew (calm mode skips frames)
 renderer.setAnimationLoop(() => {
   clock.update();
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const calm = performance.now() - lastActive > CALM_AFTER && !followId;
+  owed += clock.getDelta();
+  if (calm && owed < CALM_FRAME) return;
+  const dt = Math.min(owed, 0.05);
+  owed = 0;
   const t = clock.getElapsed();
   if (followId) {
     // Glide the orbit centre onto the followed dwarf, carrying the camera with it.
@@ -220,9 +238,9 @@ renderer.setAnimationLoop(() => {
   slates.update(t);
   audio.update(camera);
   pipeline.render();
-  governor.tick(dt);
+  if (!calm) governor.tick(dt); // 30 fps by choice must not read as a struggling GPU
   if ((hudTimer += dt) > 0.5) {
     hudTimer = 0;
-    hud.setFps(governor.fps, governor.dpr);
+    hud.setFps(calm ? 30 : governor.fps, governor.dpr, calm);
   }
 });

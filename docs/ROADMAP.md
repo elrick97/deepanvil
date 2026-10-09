@@ -147,7 +147,7 @@ event contract.
 - Per-command animations.
 - History panel and vault panel (tap the door).
 - Rate-limit "resting" state; push for every needs-you moment (blueprint ready, awaiting you, main red, quest done).
-- Pause rendering when the tab is hidden.
+- ✓ Calm mode: after 25 s with no events or input the hall renders at 30 fps (a hidden tab already pauses); anything wakes it.
 
 ### v0.3 — "Talk to the forge"
 - Thráin thread: clarifying questions, in-thread blueprint revisions, blueprint detail view and editing.
