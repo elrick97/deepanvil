@@ -95,9 +95,12 @@ export interface PlanInput {
   canAsk: boolean;
   round: number;
   rounds: number;
+  /** A revision: the blueprint you saw and what you want changed. */
+  previous?: Blueprint;
+  feedback?: string;
 }
 
-export type PlanTurn = { kind: 'questions'; questions: PlanQuestion[]; notes: string } | { kind: 'blueprint'; blueprint: Blueprint };
+export type PlanTurn = { kind: 'questions'; questions: PlanQuestion[]; notes: string } | { kind: 'blueprint'; blueprint: Blueprint; notes: string };
 
 const QUESTION_SCHEMA = {
   type: 'object',
@@ -176,6 +179,8 @@ export async function plan(input: PlanInput, repo: string, emit: Emit, ledger: L
     `The human asks:\n\n${input.request}`,
     input.notes ? `\nYour repository notes from reading it earlier (trust them; read more only if needed):\n${input.notes}` : '',
     input.qa.length ? `\nClarifications so far:\n${qaText(input.qa)}` : '',
+    input.previous ? `\nYour current blueprint (the human has read it):\n${JSON.stringify(input.previous)}` : '',
+    input.feedback ? `\nThe human asks for changes:\n${input.feedback}\nRevise the blueprint: keep what still fits, change what is asked, keep the blueprint rules.` : '',
     input.canAsk
       ? `\nStudy the repository, then either ask clarifying questions or return the blueprint. This is round ${input.round} of ${input.rounds}.`
       : '\nDo not ask further questions. Where something is still open, take the recommended or most sensible choice and state the assumption in the blueprint summary. Return the blueprint.',
@@ -210,7 +215,7 @@ export async function plan(input: PlanInput, repo: string, emit: Emit, ledger: L
   const bp: Blueprint = { title: String(out.title ?? 'Quest').slice(0, 80), summary: String(out.summary ?? ''), tasks: out.tasks };
   // Ids become branch and directory names: keep them safe.
   bp.tasks.forEach((t, i) => (t.id = (t.id || `task-${i + 1}`).toLowerCase().replace(/[^a-z0-9-]+/g, '-').slice(0, 32)));
-  return { kind: 'blueprint', blueprint: bp };
+  return { kind: 'blueprint', blueprint: bp, notes: String(out.notes ?? input.notes).slice(0, 2000) };
 }
 
 /** Re-plan one task after a smith failed it twice. */

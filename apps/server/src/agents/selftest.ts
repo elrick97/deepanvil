@@ -101,10 +101,12 @@ const stubQuestion: PlanQuestion = {
 };
 
 const stubs: Agents = {
-  plan: async (input) => {
+  plan: async (input, _repo, _emit, ledger) => {
     planCalls.push({ ...input, qa: [...input.qa] }); // a snapshot: the forge keeps appending to its own list
     if (askMode !== 'never' && input.canAsk && (askMode === 'always' || input.qa.length === 0)) return { kind: 'questions', questions: [stubQuestion], notes: 'repo notes' };
-    return { kind: 'blueprint', blueprint: { title: 'Test quest', summary: 'stub', tasks: blueprintTasks } };
+    if (input.feedback === 'slow') await new Promise((_, reject) => ledger.abort?.signal.addEventListener('abort', () => reject(new Error('aborted'))));
+    const revised = input.feedback ? { ...input.previous!, title: `Revised: ${input.feedback.slice(0, 20)}`, tasks: [...input.previous!.tasks, task(`extra-${input.qa.length}`)] } : undefined;
+    return { kind: 'blueprint', blueprint: revised ?? { title: 'Test quest', summary: 'stub', tasks: blueprintTasks }, notes: 'repo notes' };
   },
   replan: async (t) => {
     replans++;
@@ -388,6 +390,53 @@ async function main() {
   forge.handle({ type: 'plan.answer', questId: qs.questId, answers: {} }); // a late answer is ignored
   check('a late answer after stopping does nothing', !events.slice(events.indexOf(qs) + 1).some((e) => e.type === 'blueprint.proposed'));
   askMode = 'never';
+
+  // Revising a blueprint: Thráin redraws in the same conversation; tasks can be dropped without tokens.
+  blueprintTasks = [task('keep'), task('cut')];
+  planCalls.length = 0;
+  from = ask('plan me something');
+  bp = await nextEvent('blueprint.proposed', from);
+  check('the blueprint carries task detail for the card', bp.tasks[0]?.brief === 'do keep' && bp.tasks[0].acceptance === 'true' && bp.summary === 'stub' && bp.revision === 0);
+  forge.handle({ type: 'blueprint.revise', questId: bp.questId, note: 'also add logging' });
+  const revising = await nextEvent('blueprint.revising', from);
+  const rev = await nextEvent('blueprint.revised', from);
+  const last = planCalls.at(-1)!;
+  check('revision: he sees his old plan, your note and his repo notes', last.previous?.tasks.length === 2 && last.feedback === 'also add logging' && !last.canAsk && last.notes === 'repo notes' && last.qa.at(-1)?.answer.other === 'also add logging');
+  check('revision: announced, then the redrawn plan (revision 1)', events.indexOf(revising) < events.indexOf(rev) && rev.revision === 1 && rev.tasks.length === 3 && rev.title.startsWith('Revised'));
+  forge.handle({ type: 'blueprint.drop', questId: bp.questId, taskId: 'cut' });
+  const dropped = await waitFor((e) => e.type === 'blueprint.revised' && e.revision === 2);
+  check('dropping a task costs no tokens and bumps the revision', (dropped as { tasks: { id: string }[] }).tasks.map((t) => t.id).join() === 'keep,extra-1' && planCalls.length === 2);
+  forge.handle({ type: 'blueprint.approve', questId: bp.questId });
+  await waitFor((e) => e.type === 'forge.status' && !e.busy && events.indexOf(e) > events.indexOf(dropped), 30_000);
+  check('only the tasks that stayed were forged', merged(events.slice(from)).join() === 'extra-1,keep', merged(events.slice(from)).join());
+
+  // The revision cap: each redraw is an Opus call.
+  blueprintTasks = [task('cap')];
+  from = ask('endless tinkering');
+  bp = await nextEvent('blueprint.proposed', from);
+  for (let i = 1; i <= 6; i++) {
+    forge.handle({ type: 'blueprint.revise', questId: bp.questId, note: `change ${i}` });
+    await waitFor((e) => e.type === 'blueprint.revised' && e.revision === i && events.indexOf(e) >= from);
+  }
+  const callsBefore = planCalls.length;
+  const evCount = events.length;
+  forge.handle({ type: 'blueprint.revise', questId: bp.questId, note: 'one more' });
+  await new Promise((r) => setTimeout(r, 200));
+  check('revision cap: the seventh redraw is refused', planCalls.length === callsBefore && !events.slice(evCount).some((e) => e.type === 'blueprint.revising'));
+  rejectDraft(bp.questId);
+
+  // Stopping mid-revision keeps the old blueprint.
+  blueprintTasks = [task('steady')];
+  from = ask('revise then stop');
+  bp = await nextEvent('blueprint.proposed', from);
+  forge.handle({ type: 'blueprint.revise', questId: bp.questId, note: 'slow' });
+  const slowStart = await nextEvent('blueprint.revising', from);
+  forge.handle({ type: 'quest.abort' });
+  const restored = (await waitFor((e) => e.type === 'blueprint.revised' && events.indexOf(e) > events.indexOf(slowStart))) as { revision: number; tasks: unknown[] };
+  check('stop mid-revision: the old blueprint comes back, still approvable', restored.revision === 0 && restored.tasks.length === 1);
+  forge.handle({ type: 'blueprint.approve', questId: bp.questId });
+  await waitFor((e) => e.type === 'forge.status' && !e.busy && events.indexOf(e) > events.indexOf(slowStart), 30_000);
+  check('...and it forges normally afterwards', merged(events.slice(from)).join() === 'steady', merged(events.slice(from)).join());
 
   // Restart recovery: a proposed blueprint survives a restart.
   blueprintTasks = [task('later')];

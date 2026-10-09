@@ -52,6 +52,8 @@ export function broadcast(event: ForgeEvent): void {
   const msg = envelope(event);
   if (event.type === 'plan.questions') openQuestions = msg;
   if (event.type === 'plan.answered' || event.type === 'blueprint.proposed' || (event.type === 'forge.status' && !event.busy)) openQuestions = undefined;
+  // A revision replaces the blueprint in the replay log (late joiners get the current one as a plain proposal).
+  if (event.type === 'blueprint.revised') questLog = [envelope({ ...event, type: 'blueprint.proposed' })];
   // A rejected blueprint must not be replayed to the next client that connects.
   if (event.type === 'blueprint.rejected') questLog = [];
   if (event.type === 'blueprint.proposed') {

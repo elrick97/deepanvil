@@ -173,7 +173,10 @@ Duration  ${(0.4 + rnd() * 2).toFixed(1)}s`);
     const q = QUESTS[questN++ % QUESTS.length]!;
     const questId = `q${questN}`;
     const tasks = q.tasks.map((title, i) => ({ id: `${questId}-t${i + 1}`, title }));
-    emit({ type: 'blueprint.proposed', questId, title: q.title, tasks });
+    emit({
+      type: 'blueprint.proposed', questId, title: q.title, summary: `${tasks.length} piece(s), forged in parallel.`, revision: 0,
+      tasks: tasks.map((t) => ({ ...t, brief: `Do "${t.title}" in the existing style.`, files: [{ path: 'src/index.ts', why: 'entry point' }], acceptance: 'npm test' })),
+    });
     usage(master, 1.5);
     await jitter(5000);
     emit({ type: 'blueprint.approved', questId });

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { CREW, type ClientCommand, type Dwarf, type PlanAnswer, type PlanQuestion } from '@deepanvil/shared';
+import { CREW, type BlueprintTaskView, type ClientCommand, type Dwarf, type ForgeEvent, type PlanAnswer, type PlanQuestion } from '@deepanvil/shared';
 import type { Store } from '../store.ts';
 import { plan, replan, type Blueprint, type BlueprintTask, type QA } from './forgemaster.ts';
 import { policyFor } from './gates.ts';
@@ -41,6 +41,31 @@ interface PendingQuest {
   id: string;
   request: string;
   blueprint: Blueprint;
+  /** How many times it has been redrawn (0 = first draft). */
+  revision: number;
+  /** What Thráin learned about the repo, and what you told him: carried into revisions. */
+  notes: string;
+  qa: QA[];
+}
+
+/** How often one blueprint may be redrawn from feedback (each is an Opus call). */
+const MAX_REVISIONS = 6;
+
+/** A blueprint as the client sees it: full task detail, clipped (model text is untrusted). */
+function view(id: string, bp: Blueprint, revision: number): { questId: string; title: string; summary: string; revision: number; tasks: BlueprintTaskView[] } {
+  return {
+    questId: id,
+    title: bp.title,
+    summary: bp.summary.slice(0, 800),
+    revision,
+    tasks: bp.tasks.map((t) => ({
+      id: t.id,
+      title: t.title.slice(0, 80),
+      brief: t.brief.slice(0, 1500),
+      files: t.files.slice(0, 8).map((f) => ({ path: f.path.slice(0, 200), why: f.why.slice(0, 200) })),
+      acceptance: t.acceptance.slice(0, 400),
+    })),
+  };
 }
 
 /** Thráin's planning conversation before a blueprint exists: questions asked, answers given. */
@@ -104,9 +129,9 @@ export class Forge {
     const pending = this.store.pendingQuest();
     if (pending) {
       const blueprint = pending.blueprint as Blueprint;
-      this.pending = { id: pending.id, request: pending.request, blueprint };
+      this.pending = { id: pending.id, request: pending.request, blueprint, revision: 0, notes: '', qa: [] };
       this.busy = true;
-      this.emit({ type: 'blueprint.proposed', questId: pending.id, title: blueprint.title, tasks: blueprint.tasks.map((t) => ({ id: t.id, title: t.title })) });
+      this.emit({ type: 'blueprint.proposed', ...view(pending.id, blueprint, 0) });
     }
     this.emit(this.status());
     this.emit(this.ledger.event());
@@ -145,10 +170,16 @@ export class Forge {
         this.answerPlan(cmd.questId, undefined);
         break;
       case 'blueprint.approve':
-        if (this.pending?.id === cmd.questId) void this.forge(this.pending);
+        if (this.pending?.id === cmd.questId && !this.activeQuest) void this.forge(this.pending);
+        break;
+      case 'blueprint.revise':
+        void this.revise(cmd.questId, String(cmd.note ?? ''));
+        break;
+      case 'blueprint.drop':
+        this.dropTask(cmd.questId, cmd.taskId);
         break;
       case 'blueprint.reject':
-        if (this.pending?.id === cmd.questId) {
+        if (this.pending?.id === cmd.questId && !this.activeQuest) {
           this.store.setQuestStatus(cmd.questId, 'rejected');
           this.history();
           this.pending = undefined;
@@ -261,8 +292,8 @@ export class Forge {
       const blueprint = turn.blueprint;
       this.draft = undefined;
       this.store.proposeQuest(id, blueprint.title, blueprint);
-      this.pending = { id, request: draft.request, blueprint };
-      this.emit({ type: 'blueprint.proposed', questId: id, title: blueprint.title, tasks: blueprint.tasks.map((t) => ({ id: t.id, title: t.title })) });
+      this.pending = { id, request: draft.request, blueprint, revision: 0, notes: turn.notes, qa: draft.qa };
+      this.emit({ type: 'blueprint.proposed', ...view(id, blueprint, 0) });
       this.say(blueprint.summary);
     } catch (err) {
       this.draft = undefined;
@@ -274,6 +305,63 @@ export class Forge {
       this.ledger.questId = undefined;
       this.history();
     }
+  }
+
+  /** You ask for changes: Thráin redraws in the same conversation (one Opus turn, no new questions). */
+  private async revise(questId: string, note: string): Promise<void> {
+    const p = this.pending;
+    const text = note.trim().slice(0, 2000);
+    if (!p || p.id !== questId || this.activeQuest || !text) return;
+    if (p.revision >= MAX_REVISIONS) {
+      this.say('We have redrawn this one often enough. Light the forges, or send it back and start afresh.');
+      return;
+    }
+    this.activeQuest = p.id;
+    this.abort = new AbortController();
+    this.ledger.questId = p.id;
+    this.ledger.abort = this.abort;
+    this.emit({ type: 'blueprint.revising', questId: p.id });
+    this.say('Let me redraw that…');
+    const asked: QA = {
+      question: { id: `change-${p.revision + 1}`, header: 'Change', question: `Change request ${p.revision + 1} to the blueprint`, options: [], multiSelect: false, recommended: [] },
+      answer: { picks: [], other: text },
+    };
+    try {
+      const turn = await this.agents.plan(
+        { request: p.request, qa: [...p.qa, asked], notes: p.notes, canAsk: false, round: PLAN_ROUNDS, rounds: PLAN_ROUNDS, previous: p.blueprint, feedback: text },
+        this.cfg.repo,
+        this.emit,
+        this.ledger,
+      );
+      if (this.stopped) throw new Error('stopped');
+      if (turn.kind !== 'blueprint') throw new Error('Thráin asked a question instead of redrawing');
+      Object.assign(p, { blueprint: turn.blueprint, notes: turn.notes, qa: [...p.qa, asked], revision: p.revision + 1 });
+      this.store.proposeQuest(p.id, p.blueprint.title, p.blueprint);
+      this.emit({ type: 'blueprint.revised', ...view(p.id, p.blueprint, p.revision) });
+      this.say(p.blueprint.summary);
+    } catch (err) {
+      // The old blueprint is still good: put its card back and say what happened.
+      if (!this.stopped) this.fail(err instanceof Error ? err.message : String(err));
+      else this.say('Stopped. The blueprint stays as it was.');
+      this.emit({ type: 'blueprint.revised', ...view(p.id, p.blueprint, p.revision) });
+    } finally {
+      this.activeQuest = undefined;
+      this.ledger.questId = undefined;
+      this.history();
+    }
+  }
+
+  /** You take a task out of the blueprint. No tokens: it is just editing the plan. */
+  private dropTask(questId: string, taskId: string): void {
+    const p = this.pending;
+    if (!p || p.id !== questId || this.activeQuest) return;
+    if (p.blueprint.tasks.length < 2) return this.say('A blueprint needs at least one task. Send it back instead.');
+    const tasks = p.blueprint.tasks.filter((t) => t.id !== taskId);
+    if (tasks.length === p.blueprint.tasks.length) return;
+    p.blueprint = { ...p.blueprint, tasks };
+    p.revision++;
+    this.store.proposeQuest(p.id, p.blueprint.title, p.blueprint);
+    this.emit({ type: 'blueprint.revised', ...view(p.id, p.blueprint, p.revision) });
   }
 
   /** Your answers (or undefined: "just draft it" with Thráin's own picks) to the current questions. */

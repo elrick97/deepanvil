@@ -21,6 +21,15 @@ export interface LogEntry {
   text: string;
 }
 
+/** A blueprint task as shown to you: enough to judge it before the forges are lit. */
+export interface BlueprintTaskView {
+  id: string;
+  title: string;
+  brief?: string;
+  files?: { path: string; why: string }[];
+  acceptance?: string;
+}
+
 /** One clarifying question from the Forgemaster (an ask-question form: pick option(s) or write your own). */
 export interface PlanQuestion {
   id: string;
@@ -50,7 +59,11 @@ export type ForgeEvent =
   | { type: 'plan.questions'; questId: string; round: number; rounds: number; questions: PlanQuestion[] }
   /** The questions were answered (or the quest ended): every open form closes. */
   | { type: 'plan.answered'; questId: string }
-  | { type: 'blueprint.proposed'; questId: string; title: string; tasks: { id: string; title: string }[] }
+  | { type: 'blueprint.proposed'; questId: string; title: string; summary?: string; revision?: number; tasks: BlueprintTaskView[] }
+  /** Thráin redrew the blueprint (or you dropped a task): same shape, but not a new quest. */
+  | { type: 'blueprint.revised'; questId: string; title: string; summary?: string; revision: number; tasks: BlueprintTaskView[] }
+  /** Thráin is redrawing it from your feedback: the card waits. */
+  | { type: 'blueprint.revising'; questId: string }
   /** You sent the blueprint back: every screen drops its draft card and banner. */
   | { type: 'blueprint.rejected'; questId: string }
   | { type: 'blueprint.approved'; questId: string }
@@ -131,6 +144,10 @@ export type ClientCommand =
   /** "Just draft it": Thráin goes ahead with his own picks. */
   | { type: 'plan.skip'; questId: string }
   | { type: 'blueprint.approve'; questId: string }
+  /** Ask Thráin for changes; he redraws in the same conversation. */
+  | { type: 'blueprint.revise'; questId: string; note: string }
+  /** Take one task out of the blueprint (no tokens spent). */
+  | { type: 'blueprint.drop'; questId: string; taskId: string }
   | { type: 'blueprint.reject'; questId: string }
   | { type: 'quest.abort' }
   | { type: 'permission.answer'; requestId: string; approved: boolean }
