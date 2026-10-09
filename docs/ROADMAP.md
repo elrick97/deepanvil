@@ -158,7 +158,8 @@ event contract.
 - Still to do: library scholar for repo Q&A (read-only Sonnet at the lectern); whisper to a smith; pause, cancel or retry a single task; editing a task's text in the blueprint card.
 
 ### v0.4 — "Real repos"
-- Project picker (local path or GitHub clone), dirty-repo handling, settings panel.
+- ✓ Project picker (the project chip in the HUD): add a repository by its WSL path (validated) or clone an https:// URL, switch between projects while idle, forget one. Each project keeps its own history, vault, Odin and merge rules; Odin keeps whichever branch the repo has checked out (not just `main`), and only the sandbox defaults to auto-merge.
+- Dirty-repo handling, settings panel.
 - Project instructions and skills (CLAUDE.md / AGENTS.md) for Thráin and the smiths; per-repo custom gates. (Today `settingSources: []` makes agents ignore a repo's own instructions: the first thing real repos need.)
 - O4 PR mode; quest report; whole-quest diff with inline comments as send-back notes.
 - Quest board backlog; "always allow" permission rules; opt-in MCP per repo.
