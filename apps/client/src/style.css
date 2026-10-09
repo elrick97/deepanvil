@@ -365,3 +365,47 @@ html, body {
 .slate-text { overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 640px) { .slate { font-size: 10px; max-width: 40vw; } }
 @media (prefers-reduced-motion: reduce) { .slate { transition: none; } }
+
+/* --- Thráin's questions: the clarify form ------------------------------------ */
+#clarify { display: contents; }
+#clarify[hidden] { display: none; }
+.clarify {
+  order: -1;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(62vh, calc(100vh - 230px));
+  border-color: #c9a0ff;
+}
+.clarify-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.clarify-title { font-family: 'Cinzel', serif; font-size: 16px; letter-spacing: 0.04em; }
+.clarify-meta { font-size: 11px; opacity: 0.7; }
+.clarify-body { overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 12px; padding-right: 2px; }
+.clarify-q { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.clarify-legend { display: flex; gap: 8px; align-items: baseline; padding: 0; margin-bottom: 2px; font-size: 13.5px; font-weight: 700; }
+.clarify-text { overflow-wrap: anywhere; }
+.clarify-opt {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 6px 9px;
+  border-radius: 9px;
+  border: 1px solid rgba(246, 231, 200, 0.16);
+  cursor: pointer;
+}
+.clarify-opt:has(input:checked) { border-color: #c9a0ff; background: rgba(201, 160, 255, 0.14); }
+.clarify-opt input { margin-top: 3px; accent-color: #c9a0ff; flex: none; }
+.clarify-words { display: flex; flex-direction: column; min-width: 0; }
+.clarify-label { font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+.clarify-desc { font-size: 11.5px; opacity: 0.75; overflow-wrap: anywhere; }
+.clarify-other {
+  font: inherit;
+  font-size: 12.5px;
+  padding: 6px 9px;
+  border-radius: 9px;
+  border: 1px dashed rgba(246, 231, 200, 0.3);
+  background: rgba(0, 0, 0, 0.2);
+  color: inherit;
+}
+.clarify-actions { display: flex; gap: 8px; justify-content: flex-end; }

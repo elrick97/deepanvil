@@ -319,6 +319,15 @@ export class Crew {
 
   handle(e: ForgeEvent): void {
     if (e.type === 'forge.rest') return this.setResting(e.resting);
+    if (e.type === 'plan.questions' && this.master) {
+      // He strokes his beard until you answer.
+      this.play(this.master, 'scratch_beard', 600);
+      return;
+    }
+    if (e.type === 'plan.answered' && this.master) {
+      this.play(this.master, 'read', 6);
+      return;
+    }
     if (e.type === 'offering.opened') this.offeringOwner.set(e.offeringId, e.dwarfId);
     if (e.type === 'offering.state' || e.type === 'offering.merged') {
       const m = this.members.get(this.offeringOwner.get(e.offeringId) ?? '');
