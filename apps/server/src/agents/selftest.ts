@@ -334,6 +334,17 @@ async function main() {
   check('minecart rolls on merge', evs.some((e) => e.type === 'merge'));
   check('anvils cleared afterwards', worktrees() === 1);
 
+  // The history panel: a past quest in full, on request.
+  const firstId = (evs.find((e) => e.type === 'blueprint.proposed') as { questId: string }).questId;
+  const detailAt = events.length;
+  forge.handle({ type: 'history.open', questId: firstId });
+  const detail = (await waitFor((e) => e.type === 'quest.detail' && events.indexOf(e) >= detailAt)) as Extract<ForgeEvent, { type: 'quest.detail' }>;
+  check('history: a past quest comes back with tasks, offerings and reviews', detail.detail.tasks.map((t) => t.id).sort().join() === 'alpha,beta' && detail.detail.tasks.every((t) => t.status === 'merged') && detail.detail.offerings.length === 2 && detail.detail.offerings.every((o) => o.state === 'merged' && o.review?.decision === 'approve') && detail.detail.request === 'test', JSON.stringify(detail.detail.offerings));
+  const unknownAt = events.length;
+  forge.handle({ type: 'history.open', questId: 'no-such-quest' });
+  await new Promise((r) => setTimeout(r, 100));
+  check('history: an unknown quest id is ignored', !events.slice(unknownAt).some((e) => e.type === 'quest.detail'));
+
   evs = await quest([task('gatefix')]);
   check('red gate → sent back with notes → fixed', sentBack(evs, 'gate') === 1 && merged(evs).join() === 'gatefix');
   check('no review spent on the red revision', reviewed.filter((t) => t === 'gatefix').length === 1);

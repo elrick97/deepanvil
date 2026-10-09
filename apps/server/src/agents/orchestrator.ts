@@ -208,6 +208,11 @@ export class Forge {
       case 'plan.change':
         this.changeWaits.get(cmd.changeId)?.(cmd.approve === true);
         break;
+      case 'history.open': {
+        const detail = this.store.questDetail(String(cmd.questId));
+        if (detail) this.emit({ type: 'quest.detail', detail });
+        break;
+      }
       case 'quest.rescope':
         void this.rescope(cmd.questId, String(cmd.note ?? ''));
         break;

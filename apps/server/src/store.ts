@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { Model, ModelTotals, QuestSummary } from '@deepanvil/shared';
+import type { Model, ModelTotals, QuestDetail, QuestSummary } from '@deepanvil/shared';
 
 // The forge's memory (Node's built-in SQLite: no native modules, so it runs fine from the
 // node_modules shared with Windows). Lives in WSL at ~/.deepanvil/forge.db.
@@ -140,7 +140,7 @@ export class Store {
     return rows.map((r) => r.id);
   }
 
-  history(limit = 12): QuestSummary[] {
+  history(limit = 30): QuestSummary[] {
     const rows = this.db
       .prepare(
         `SELECT q.id, q.title, q.request, q.status, q.created_at, q.merged, q.failed,
@@ -157,6 +157,35 @@ export class Store {
       failed: r.failed,
       costUsd: r.cost,
     }));
+  }
+
+  /** One quest in full: the request, its tasks, spend per tier, and how Odin judged each piece. */
+  questDetail(id: string): QuestDetail | undefined {
+    const q = this.db.prepare('SELECT id, title, request, status, created_at, finished_at FROM quests WHERE id = ?').get(id) as
+      | { id: string; title: string | null; request: string; status: string; created_at: number; finished_at: number | null }
+      | undefined;
+    if (!q) return undefined;
+    const spend: QuestDetail['spend'] = {};
+    for (const r of this.db.prepare('SELECT model, SUM(cost_usd) AS cost, COUNT(*) AS calls FROM spend WHERE quest_id = ? GROUP BY model').all(id) as { model: string; cost: number; calls: number }[]) {
+      spend[r.model as Model] = { costUsd: r.cost, calls: r.calls };
+    }
+    const tasks = (this.db.prepare('SELECT id, title, dwarf_id, status, attempts, summary FROM tasks WHERE quest_id = ? ORDER BY updated_at').all(id) as {
+      id: string; title: string; dwarf_id: string; status: string; attempts: number; summary: string | null;
+    }[]).map((t) => ({ id: t.id, title: t.title, dwarfId: t.dwarf_id, status: t.status, attempts: t.attempts, ...(t.summary ? { summary: t.summary.slice(0, 600) } : {}) }));
+    const offerings = (this.db.prepare('SELECT id, task_id, revision, state, reason, lines FROM offerings WHERE quest_id = ? ORDER BY created_at, revision').all(id) as {
+      id: string; task_id: string; revision: number; state: string; reason: string | null; lines: number;
+    }[]).map((o) => {
+      const review = this.db.prepare('SELECT decision, summary FROM reviews WHERE offering_id = ? AND revision = ? ORDER BY at DESC LIMIT 1').get(o.id, o.revision) as { decision: string; summary: string | null } | undefined;
+      return {
+        taskId: o.task_id,
+        revision: o.revision,
+        state: o.state,
+        lines: o.lines,
+        ...(o.reason ? { reason: o.reason } : {}),
+        ...(review ? { review: { decision: review.decision, summary: (review.summary ?? '').slice(0, 400) } } : {}),
+      };
+    });
+    return { id: q.id, title: q.title ?? q.request.slice(0, 60), request: q.request.slice(0, 2000), status: q.status, createdAt: q.created_at, ...(q.finished_at ? { finishedAt: q.finished_at } : {}), spend, tasks, offerings };
   }
 
   // ------------------------------------------------------------------ tasks & crew

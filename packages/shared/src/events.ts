@@ -106,6 +106,7 @@ export type ForgeEvent =
   | { type: 'limits'; status: 'allowed' | 'allowed_warning' | 'rejected'; fiveHour?: LimitWindow; sevenDay?: LimitWindow }
   | { type: 'ledger'; byModel: Partial<Record<Model, ModelTotals>>; totalUsd: number; since: number }
   | { type: 'history'; quests: QuestSummary[] }
+  | { type: 'quest.detail'; detail: QuestDetail }
   | { type: 'push.config'; publicKey: string }
   // --- Odin, keeper of the Vault of Main (docs/ODIN.md)
   | { type: 'offering.opened'; offeringId: string; questId: string; taskId: string; dwarfId: string; title: string; revision: number; lines: number }
@@ -135,6 +136,20 @@ export interface Finding {
 export interface LimitWindow {
   utilization: number;
   resetsAt: number;
+}
+
+/** A past quest in full, for the history panel: what was asked, what each task became, what it cost. */
+export interface QuestDetail {
+  id: string;
+  title: string;
+  request: string;
+  status: string;
+  createdAt: number;
+  finishedAt?: number;
+  spend: Partial<Record<Model, { costUsd: number; calls: number }>>;
+  tasks: { id: string; title: string; dwarfId: string; status: string; attempts: number; summary?: string }[];
+  /** Pieces offered to Odin: how each revision fared, and his review. */
+  offerings: { taskId: string; revision: number; state: string; reason?: string; lines: number; review?: { decision: string; summary: string } }[];
 }
 
 /** One line of the quest log (newest first). */
@@ -173,6 +188,8 @@ export type ClientCommand =
   | { type: 'blueprint.drop'; questId: string; taskId: string }
   | { type: 'blueprint.reject'; questId: string }
   | { type: 'quest.abort' }
+  /** Open a past quest in the history panel. */
+  | { type: 'history.open'; questId: string }
   | { type: 'permission.answer'; requestId: string; approved: boolean }
   | { type: 'offering.merge'; offeringId: string }
   | { type: 'offering.send_back'; offeringId: string; note?: string }
