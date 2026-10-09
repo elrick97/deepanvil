@@ -153,7 +153,7 @@ event contract.
 - ✓ Clarifying questions: Thráin asks (at most two rounds, a recommended pick on every question) in a small form before he drafts; "Just draft it" uses his picks.
 - ✓ Blueprint card: task detail (brief, files, acceptance), drop a task for free, ask Thráin for changes (he redraws in the same conversation; at most 6 redraws per blueprint). Inline editing of a task's text is still open.
 - ✓ Replanning ladder: a smith flags `blocked` (wrong assumption / too big / depends on another task / out of scope) instead of failing; Thráin triages: rewrite (automatic), re-slice (automatic unless it adds more tasks than it replaces, then a card with the diff waits for your yes), or ask you through the question form. At most 3 replans per quest; merged work stays on main.
-- Rescope mid-quest by hand (a "Rescope" button / message that gives Thráin the live state).
+- ✓ Rescope mid-quest by hand: while forging, the composer becomes a "change the plan" line; Thráin sees every task and where it stands and proposes a re-cut (drop queued or running tasks, add up to 4) that always waits for your yes. Merged work and pieces with Odin are never touched; at most 4 per quest.
 - Library scholar for repo Q&A (read-only Sonnet at the lectern).
 - Whisper to a smith; pause, cancel or retry a single task.
 - Project instructions and skills (CLAUDE.md / AGENTS.md); per-repo custom gates.
