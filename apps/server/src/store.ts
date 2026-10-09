@@ -135,6 +135,11 @@ export class Store {
     this.db.prepare('DELETE FROM projects WHERE path = ?').run(path);
   }
 
+  /** Has a quest ever been approved (forged) in this repository? That is when you first trusted it with running its scripts. */
+  hasForged(repo: string): boolean {
+    return !!this.db.prepare("SELECT 1 FROM quests WHERE repo = ? AND status IN ('forging', 'done', 'failed', 'interrupted') LIMIT 1").get(repo);
+  }
+
   /** Known projects, most recently used first, with how many quests each has had. */
   listProjects(): { path: string; name: string; quests: number; lastUsed?: number }[] {
     const rows = this.db

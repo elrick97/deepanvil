@@ -197,7 +197,7 @@ export class Forge {
     this.emit(this.ledger.event());
     this.history();
     this.emitProjects();
-    if (existsSync(this.cfg.repo)) void this.odin.checkHealth();
+    if (existsSync(this.cfg.repo) && this.trusted(this.cfg.repo)) void this.odin.checkHealth();
   }
 
   private async clearAnvils(): Promise<void> {
@@ -227,6 +227,15 @@ export class Forge {
         ...(p.path === this.cfg.repo ? { instructions: this.instructionFiles } : {}),
       })),
     });
+  }
+
+  /**
+   * May the forge run this project's own scripts (its tests, typecheck, lint) without being asked? Only
+   * the practice sandbox, or a project where you have approved a quest before. A repository you have just
+   * added or cloned runs nothing of its own until then: the first run is the quest you approve.
+   */
+  private trusted(repo: string): boolean {
+    return repo === this.cfg.sandboxRepo || this.store.hasForged(repo);
   }
 
   /** No quest is running, drafting, waiting on you, or being set up: safe to change projects. */
@@ -302,7 +311,8 @@ export class Forge {
       this.history();
       this.emitProjects();
       this.say(`We turn to ${basename(root)}.`);
-      void this.odin.checkHealth();
+      if (this.trusted(root)) void this.odin.checkHealth();
+      else this.say('I will not run this project’s own tests until you approve a quest here.');
     } catch (err) {
       this.fail(err instanceof Error ? err.message : String(err));
     } finally {

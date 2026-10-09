@@ -228,7 +228,7 @@ const stubs: Agents = {
 
 const store = new Store(join(root, 'forge.db'));
 store.setPolicy(repo, JSON.stringify(policy));
-const forge = new Forge(emit, { repo, smiths: 2 }, store, stubs);
+const forge = new Forge(emit, { repo, smiths: 2, sandboxRepo: repo }, store, stubs);
 let failures = 0;
 const check = (name: string, ok: boolean, detail = '') => {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
@@ -775,12 +775,32 @@ async function main() {
   check('projects: a forgotten project leaves the list (its files stay)', !lastProjects().some((pr) => pr.path === realpathSync(trunkRepo)) && existsSync(trunkRepo));
   check('projects: an unknown project cannot be switched to', (await errorFor({ type: 'project.switch', path: realpathSync(trunkRepo) })).includes('not on the list'));
 
+  // A project you have only just added runs none of its own scripts until you approve a quest in it.
+  const marker = join(root, 'trust-marker');
+  const trustRepo = mkRepo('trust-repo', 'main', false);
+  writeFileSync(join(trustRepo, 'package.json'), JSON.stringify({ scripts: { test: `node -e "require('fs').writeFileSync('${marker}', 'ran')"` } }));
+  writeFileSync(join(trustRepo, 'README.md'), '# trust\n');
+  sh(trustRepo, 'add', '-A');
+  sh(trustRepo, 'commit', '-q', '-m', 'init');
+  const trustAt = events.length;
+  forge.handle({ type: 'project.add', path: trustRepo });
+  await waitFor((e) => e.type === 'forge.status' && e.repo === realpathSync(trustRepo) && events.indexOf(e) >= trustAt);
+  await new Promise((r) => setTimeout(r, 1500));
+  check('trust: switching to a new project runs none of its scripts', !existsSync(marker) && !existsSync(`${trustRepo}.anvils/odin`));
+  check('trust: and says so', events.slice(trustAt).some((e) => e.type === 'master.say' && e.text.includes('until you approve a quest')));
+  evs = await quest([task('trusty')]);
+  check('trust: approving a quest is when its scripts first run', existsSync(marker) && merged(evs).join() === 'trusty', merged(evs).join());
+  check('trust: from then on the project is trusted', store.hasForged(realpathSync(trustRepo)) && !store.hasForged(realpathSync(emptyRepo)));
+  forge.handle({ type: 'project.switch', path: realpathSync(repo) });
+  await waitFor((e) => e.type === 'forge.status' && e.repo === realpathSync(repo) && events.indexOf(e) >= events.length - 20);
+  forge.handle({ type: 'project.forget', path: realpathSync(trustRepo) });
+
   // Restart recovery: a proposed blueprint survives a restart.
   blueprintTasks = [task('later')];
   forge.handle({ type: 'quest.request', text: 'survive a restart' });
   await waitFor((e) => e.type === 'blueprint.proposed' && (e as { tasks: { id: string }[] }).tasks[0]?.id === 'later');
   const reborn: ForgeEvent[] = [];
-  await new Forge((e) => reborn.push(e), { repo, smiths: 2 }, new Store(join(root, 'forge.db')), stubs).recover();
+  await new Forge((e) => reborn.push(e), { repo, smiths: 2, sandboxRepo: repo }, new Store(join(root, 'forge.db')), stubs).recover();
   check('restart re-offers the pending blueprint', reborn.some((e) => e.type === 'blueprint.proposed'));
   check('history persisted across restart', ((reborn.find((e) => e.type === 'history') as { quests: unknown[] } | undefined)?.quests.length ?? 0) >= 12);
   check('no stray files left in the main checkout', mainIsClean() && !existsSync(join(repo, 'flaky-mark')));
