@@ -145,7 +145,8 @@ event contract.
 - ✓ Command slate in front of each anvil (what the smith runs now; green or red on test results).
 - ✓ To-do chalkboard under each slate (the smith's own to-do list, `dwarf.todos` events, replayed to late joiners).
 - Per-command animations.
-- History panel and vault panel (tap the door).
+- ✓ History panel (📜 in the HUD): every past quest with outcome and coins; tap one for the request, each task with its smith and summary, spend per tier, and Odin's verdict on each piece.
+- Vault panel (tap the door).
 - ✓ Rate-limit "resting" state (a rejected call rests until the window resets, then the same call runs again; crew naps, HUD countdown, push on rest and wake); push for every needs-you moment (blueprint ready, awaiting you, main red, quest done).
 - ✓ Calm mode: after 25 s with no events or input the hall renders at 30 fps (a hidden tab already pauses); anything wakes it.
 
