@@ -2,6 +2,7 @@ import type { HookCallback } from '@anthropic-ai/claude-agent-sdk';
 import type { Dwarf } from '@deepanvil/shared';
 import { MODELS, SANDBOX_READY } from './engine.ts';
 import type { BlueprintTask } from './forgemaster.ts';
+import { loadInstructions, withInstructions } from './instructions.ts';
 import { isTestCommand, judge, kindOf } from './permissions.ts';
 import { log, runAgent, type Emit, type Ledger } from './run.ts';
 import { digest } from './sprite.ts';
@@ -82,6 +83,11 @@ function outputText(resp: unknown): string {
   return JSON.stringify(resp ?? '');
 }
 
+/** The smith's rules plus the repository's own instructions (read from the worktree's committed HEAD). */
+export async function smithSystem(worktree: string): Promise<string> {
+  return withInstructions(RULES, await loadInstructions(worktree));
+}
+
 export async function runSmith(run: SmithRun): Promise<SmithOutcome> {
   const { smith, task, worktree, emit, ledger } = run;
   let testEvents = 0;
@@ -151,7 +157,7 @@ export async function runSmith(run: SmithRun): Promise<SmithOutcome> {
       prompt,
       options: {
         cwd: worktree,
-        systemPrompt: { type: 'preset', preset: 'claude_code', append: RULES },
+        systemPrompt: { type: 'preset', preset: 'claude_code', append: await smithSystem(worktree) },
         disallowedTools: ['Task', 'Agent', 'WebSearch'],
         permissionMode: 'default',
         // Defence in depth: the OS sandbox when available (see engine.ts), never silently skipped.

@@ -193,6 +193,8 @@ export interface ProjectInfo {
   lastUsed?: number;
   /** The practice sandbox: the only project that defaults to auto-merge. */
   sandbox: boolean;
+  /** The active project's instruction files the agents read (CLAUDE.md, AGENTS.md); empty if it has none. */
+  instructions?: string[];
 }
 
 /** One line of the quest log (newest first). */

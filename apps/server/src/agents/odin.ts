@@ -4,6 +4,7 @@ import type { ForgeEvent, GateName } from '@deepanvil/shared';
 import type { Store } from '../store.ts';
 import type { BlueprintTask } from './forgemaster.ts';
 import { GATES, LOCKFILES, runGate, type Policy } from './gates.ts';
+import { conventionsFor, loadInstructions } from './instructions.ts';
 import { git, worktreesDir } from './git.ts';
 import type { Reviewer } from './odin-review.ts';
 import type { Emit, Ledger } from './run.ts';
@@ -213,7 +214,9 @@ export class Odin {
     this.state(o, 'reviewing');
     const diff = await git(this.scratch, 'diff', this.d.base, 'HEAD');
     this.diffs.set(o.id, diff);
-    const verdict = await this.d.reviewer(o.task, diff.slice(0, 150_000), ran.join(', ') || 'no gates configured', this.d.emit, this.d.ledger);
+    // The conventions come from the base branch, not the offered one: a smith cannot rewrite the rules it is judged by.
+    const conventions = conventionsFor(await loadInstructions(this.d.repo));
+    const verdict = await this.d.reviewer(o.task, diff.slice(0, 150_000), ran.join(', ') || 'no gates configured', this.d.emit, this.d.ledger, conventions);
     if (this.abort.signal.aborted) return { kind: 'abandoned' };
     this.d.store.recordReview(o.id, o.revision, verdict.decision, verdict.summary, verdict.findings);
     this.d.emit({ type: 'offering.review', offeringId: o.id, decision: verdict.decision, summary: untested ? `(untested: no test gate) ${verdict.summary}` : verdict.summary, findings: verdict.findings });

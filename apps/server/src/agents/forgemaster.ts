@@ -1,5 +1,6 @@
 import type { PlanAnswer, PlanQuestion } from '@deepanvil/shared';
 import { MODELS } from './engine.ts';
+import { loadInstructions, withInstructions } from './instructions.ts';
 import { runAgent, type Emit, type Ledger } from './run.ts';
 
 // Thráin, the Forgemaster (Opus). Plans and re-plans; never writes code or reviews it (Odin does).
@@ -62,6 +63,11 @@ const BLUEPRINT_SCHEMA = {
 } as const;
 
 const READ_ONLY = ['Read', 'Grep', 'Glob', 'LS'];
+
+/** A system prompt plus what the repository's maintainers wrote down (CLAUDE.md, AGENTS.md). */
+export async function systemFor(base: string, repo: string): Promise<string> {
+  return withInstructions(base, await loadInstructions(repo));
+}
 
 // ---------------------------------------------------------------- clarifying questions
 
@@ -192,7 +198,7 @@ export async function plan(input: PlanInput, repo: string, emit: Emit, ledger: L
       prompt,
       options: {
         cwd: repo,
-        systemPrompt: SYSTEM + CLARIFY,
+        systemPrompt: await systemFor(SYSTEM + CLARIFY, repo),
         tools: READ_ONLY,
         allowedTools: READ_ONLY,
         maxTurns: 25,
@@ -282,7 +288,7 @@ export async function triage(input: TriageInput, repo: string, emit: Emit, ledge
       prompt,
       options: {
         cwd: repo,
-        systemPrompt: SYSTEM + TRIAGE,
+        systemPrompt: await systemFor(SYSTEM + TRIAGE, repo),
         tools: READ_ONLY,
         allowedTools: READ_ONLY,
         maxTurns: 15,
@@ -343,7 +349,7 @@ export async function rescope(input: RescopeInput, repo: string, emit: Emit, led
       prompt,
       options: {
         cwd: repo,
-        systemPrompt: SYSTEM + RESCOPE,
+        systemPrompt: await systemFor(SYSTEM + RESCOPE, repo),
         tools: READ_ONLY,
         allowedTools: READ_ONLY,
         maxTurns: 15,
@@ -388,7 +394,7 @@ export async function replan(task: BlueprintTask, failureNotes: string, repo: st
       ].join('\n'),
       options: {
         cwd: repo,
-        systemPrompt: SYSTEM,
+        systemPrompt: await systemFor(SYSTEM, repo),
         tools: READ_ONLY,
         allowedTools: READ_ONLY,
         maxTurns: 15,

@@ -44,9 +44,10 @@ const SCHEMA = {
   },
 };
 
-export type Reviewer = (task: BlueprintTask, diff: string, gateSummary: string, emit: Emit, ledger: Ledger) => Promise<Verdict>;
+/** `conventions` is the repository's own instructions (CLAUDE.md, AGENTS.md) as committed on the base branch. */
+export type Reviewer = (task: BlueprintTask, diff: string, gateSummary: string, emit: Emit, ledger: Ledger, conventions?: string) => Promise<Verdict>;
 
-export const sonnetReview: Reviewer = async (task, diff, gateSummary, emit, ledger) => {
+export const sonnetReview: Reviewer = async (task, diff, gateSummary, emit, ledger, conventions) => {
   const r = await runAgent(
     {
       dwarfId: 'odin',
@@ -54,6 +55,8 @@ export const sonnetReview: Reviewer = async (task, diff, gateSummary, emit, ledg
       prompt: [
         `<task>${JSON.stringify({ title: task.title, brief: task.brief, acceptance: task.acceptance })}</task>`,
         `<gates>${gateSummary}</gates>`,
+        // The maintainers' own rules (judge the change against them too); in the user turn so the system prompt stays one cached prefix.
+        ...(conventions ? [`<repo-conventions>\n${conventions.replaceAll('</repo-conventions>', '</ repo-conventions>')}\n</repo-conventions>`] : []),
         `<diff>\n${diff}\n</diff>`,
       ].join('\n'),
       options: {

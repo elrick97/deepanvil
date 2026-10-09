@@ -6,6 +6,7 @@ import { CREW, type BlueprintTaskView, type ClientCommand, type Dwarf, type Forg
 import type { Store } from '../store.ts';
 import { plan, replan, rescope, triage, type Blueprint, type BlueprintTask, type QA } from './forgemaster.ts';
 import { policyFor } from './gates.ts';
+import { loadInstructions } from './instructions.ts';
 import { addWorktree, cloneInto, cloneTarget, commitAll, git, inspectRepo, removeWorktree, worktreesDir } from './git.ts';
 import { linkDependencies, Odin } from './odin.ts';
 import { sonnetReview, type Reviewer } from './odin-review.ts';
@@ -131,6 +132,8 @@ export class Forge {
   private draft?: Draft;
   /** The branch Odin keeps in the current project: the one checked out there. */
   private base = 'main';
+  /** The instruction files the agents read in the current project. */
+  private instructionFiles: string[] = [];
   /** A project switch or clone is under way: no quest may start. */
   private switching = false;
   private run?: QuestRun;
@@ -178,6 +181,7 @@ export class Forge {
     }
     this.store.upsertProject(this.cfg.repo, basename(this.cfg.repo));
     if (info) this.store.touchProject(this.cfg.repo);
+    this.instructionFiles = info ? (await loadInstructions(this.cfg.repo)).files : [];
     this.store.abandonOpenOfferings();
     const lost = this.store.interruptUnfinished();
     if (lost.length) this.say(`The forge went cold mid-quest; ${lost.length} quest(s) were interrupted. Their branches are kept.`);
@@ -216,7 +220,12 @@ export class Forge {
   private emitProjects(): void {
     this.emit({
       type: 'projects',
-      projects: this.store.listProjects().map((p) => ({ ...p, active: p.path === this.cfg.repo, sandbox: p.path === this.cfg.sandboxRepo })),
+      projects: this.store.listProjects().map((p) => ({
+        ...p,
+        active: p.path === this.cfg.repo,
+        sandbox: p.path === this.cfg.sandboxRepo,
+        ...(p.path === this.cfg.repo ? { instructions: this.instructionFiles } : {}),
+      })),
     });
   }
 
@@ -287,6 +296,7 @@ export class Forge {
       this.cfg.defaultMode = root === this.cfg.sandboxRepo ? 'auto' : 'approve';
       this.store.touchProject(root);
       this.store.setSetting('activeProject', root);
+      this.instructionFiles = (await loadInstructions(root)).files;
       await this.clearAnvils();
       this.emit(this.status());
       this.history();
