@@ -9,6 +9,7 @@ import { coinsOf } from './coins.ts';
 import { Controls } from './controls.ts';
 import { Hud } from './hud.ts';
 import { BlueprintCard } from './blueprint.ts';
+import { ChangeCard } from './change.ts';
 import { ClarifyForm } from './clarify.ts';
 import { DwarfCard } from './dwarfcard.ts';
 import { Slates } from './slates.ts';
@@ -164,6 +165,7 @@ controls.addEventListener('start', () => {
 const link = new ForgeLink();
 link.onStatus = (on) => hud.setLink(on);
 const forgeControls = new Controls(document.querySelector('#controls')!, (cmd) => link.send(cmd), crew.names);
+const changeCard = new ChangeCard(document.querySelector('#change')!, (cmd) => link.send(cmd));
 const blueprintCard = new BlueprintCard(document.querySelector('#blueprint')!, (cmd) => link.send(cmd));
 const clarify = new ClarifyForm(document.querySelector('#clarify')!, (cmd) => link.send(cmd));
 const offeringCards = new OfferingCards(document.querySelector('#offerings')!, (cmd) => link.send(cmd), crew.names);
@@ -177,6 +179,7 @@ const dispatch = (e: ForgeEvent): void => {
   forgeControls.handle(e);
   clarify.handle(e);
   blueprintCard.handle(e);
+  changeCard.handle(e);
   offeringCards.handle(e);
   alerts.handle(e);
   hud.gauge(e);

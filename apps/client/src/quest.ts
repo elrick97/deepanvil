@@ -40,6 +40,18 @@ export class QuestBanner {
         this.phase = 'drafting';
         this.tasks = e.tasks.map((t) => ({ id: t.id, title: t.title, state: 'waiting' }));
         break;
+      case 'plan.amended': {
+        // The plan changed under way: new tasks appear, replaced ones go, rewritten ones keep their chip.
+        if (e.state !== 'applied') return;
+        const gone = new Set(e.dropped.map((d) => d.id));
+        this.tasks = this.tasks.filter((t) => !gone.has(t.id));
+        for (const c of e.changed) {
+          const t = task(c.id);
+          if (t) t.title = c.title;
+        }
+        for (const a of e.added) this.tasks.push({ id: a.id, title: a.title, state: 'waiting' });
+        break;
+      }
       case 'blueprint.rejected':
         clearTimeout(this.hideTimer);
         this.tasks = [];

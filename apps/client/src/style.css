@@ -455,3 +455,30 @@ html, body {
   background: rgba(0, 0, 0, 0.25);
   color: inherit;
 }
+
+/* --- A proposed change of plan mid-quest ---------------------------------------- */
+#change { display: contents; }
+#change[hidden] { display: none; }
+.change {
+  order: -2;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(60vh, calc(100vh - 230px));
+  border-color: #ffd257;
+}
+.change-label { font-size: 11px; opacity: 0.75; letter-spacing: 0.04em; }
+.change-why { font-size: 13.5px; font-weight: 700; overflow-wrap: anywhere; margin-top: 2px; }
+.change-diff { overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+.change-row { display: flex; gap: 8px; align-items: flex-start; padding: 5px 9px; border-radius: 9px; background: rgba(0, 0, 0, 0.18); font-size: 12.5px; }
+.change-sign { font-weight: 900; width: 1.2em; text-align: center; flex: none; }
+.change-add .change-sign { color: #8fe08f; }
+.change-chg .change-sign { color: #ffd257; }
+.change-del .change-sign { color: #ff9c8c; }
+.change-del .change-title { text-decoration: line-through; opacity: 0.7; }
+.change-words { display: flex; flex-direction: column; min-width: 0; }
+.change-title { font-weight: 700; overflow-wrap: anywhere; }
+.change-detail { font-size: 11.5px; opacity: 0.75; overflow-wrap: anywhere; }
+.change-note { font-size: 11.5px; opacity: 0.7; }
+.change-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }

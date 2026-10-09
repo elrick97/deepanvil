@@ -324,7 +324,7 @@ export class Crew {
       this.play(this.master, 'scratch_beard', 600);
       return;
     }
-    if ((e.type === 'plan.answered' || e.type === 'blueprint.revised') && this.master) {
+    if ((e.type === 'plan.answered' || e.type === 'blueprint.revised' || (e.type === 'plan.amended' && e.state === 'applied')) && this.master) {
       this.play(this.master, 'read', 6);
       return;
     }
