@@ -40,7 +40,7 @@ Out of scope for 1.0, and kept for v2:
 ### Design calls still to confirm (recommendations)
 
 1. **Questions about the repo go to the Library, not to Opus.** A read-only Sonnet "scholar" answers at the lectern, so Opus stays the planner and chat stays cheap. Thráin hands over when a question isn't a quest.
-2. **Thráin's conversation is a persistent thread per repo.** It is stored in SQLite and summarised by Haiku once it grows past a budget. A blueprint revision is a new turn in the thread, not a fresh plan.
+2. **Thráin plans as a short conversation per quest, carried by a notes digest.** Each turn he returns questions or a blueprint, plus a few hundred words of notes about the repo that travel with the answers, so a later round does not re-read it. (Chosen over resuming a persisted agent session: that would write planner sessions into the user's own `~/.claude` history and would not survive a forge restart.) Blueprint revisions and replans (v0.3, next slices) are further turns of the same conversation.
 3. **The event contract becomes provider-agnostic.** `model` changes from `'opus'|'sonnet'|'haiku'` to `{ provider, model, tier }`. Coins stay "API-equivalent cents", priced per provider. Each provider gets its own window gauges.
 4. **Remote access needs pairing for the public release.** Today the forge trusts anyone who can reach it. 1.0 pairs each device once (a QR code or 6-digit code shown on the host) and stores a per-device token. Tailscale stays recommended, not required.
 5. **Settings live in SQLite and are edited in an in-world "ledger room" panel.** They cover providers per role, smith count, Odin's policy (auto or approve, protected paths, gates) and MCP allowlists. Environment variables become overrides only.
@@ -150,7 +150,9 @@ event contract.
 - ✓ Calm mode: after 25 s with no events or input the hall renders at 30 fps (a hidden tab already pauses); anything wakes it.
 
 ### v0.3 — "Talk to the forge"
-- Thráin thread: clarifying questions, in-thread blueprint revisions, blueprint detail view and editing.
+- ✓ Clarifying questions: Thráin asks (at most two rounds, a recommended pick on every question) in a small form before he drafts; "Just draft it" uses his picks.
+- In-thread blueprint revision, blueprint detail view and editing.
+- Replanning ladder: smiths flag `blocked`, Thráin triages (small / re-slice / ask you), amended blueprint shown as a diff, and you can rescope mid-quest.
 - Library scholar for repo Q&A (read-only Sonnet at the lectern).
 - Whisper to a smith; pause, cancel or retry a single task.
 - Project instructions and skills (CLAUDE.md / AGENTS.md); per-repo custom gates.
