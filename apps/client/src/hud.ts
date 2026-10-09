@@ -12,6 +12,7 @@ export class Hud {
   /** undefined until the viewer chooses; false once they muted on purpose. */
   soundWanted?: boolean;
   onSoundToggle?: (on: boolean) => void;
+  onHistory?: () => void;
   private gauges: HTMLElement;
   private mode = '';
   private limits?: { fiveHour?: LimitWindow; sevenDay?: LimitWindow };
@@ -29,6 +30,7 @@ export class Hud {
           <span data-backend></span>
           <span data-fps></span>
           <button class="sound-btn" data-sound aria-label="Toggle sound">🔇 sound</button>
+          <button class="sound-btn" data-history aria-label="Quest history">📜 history</button>
         </div>
         <div class="gauges" data-gauges></div>
       </div>
@@ -40,6 +42,10 @@ export class Hud {
     this.ticker.style.display = 'none';
     this.gauges = root.querySelector('[data-gauges]')!;
     this.soundBtn = root.querySelector('[data-sound]')!;
+    root.querySelector('[data-history]')!.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      this.onHistory?.();
+    });
     this.soundBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
       const on = this.soundBtn.dataset.on !== '1';

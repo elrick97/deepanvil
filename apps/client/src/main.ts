@@ -12,6 +12,7 @@ import { BlueprintCard } from './blueprint.ts';
 import { ChangeCard } from './change.ts';
 import { ClarifyForm } from './clarify.ts';
 import { DwarfCard } from './dwarfcard.ts';
+import { HistoryPanel } from './history.ts';
 import { Slates } from './slates.ts';
 import { OfferingCards } from './offerings.ts';
 import { Alerts } from './push.ts';
@@ -165,6 +166,8 @@ controls.addEventListener('start', () => {
 const link = new ForgeLink();
 link.onStatus = (on) => hud.setLink(on);
 const forgeControls = new Controls(document.querySelector('#controls')!, (cmd) => link.send(cmd), crew.names);
+const historyPanel = new HistoryPanel(document.querySelector('#history')!, (cmd) => link.send(cmd), crew.names);
+hud.onHistory = () => historyPanel.toggle();
 const changeCard = new ChangeCard(document.querySelector('#change')!, (cmd) => link.send(cmd));
 const blueprintCard = new BlueprintCard(document.querySelector('#blueprint')!, (cmd) => link.send(cmd));
 const clarify = new ClarifyForm(document.querySelector('#clarify')!, (cmd) => link.send(cmd));
@@ -180,6 +183,7 @@ const dispatch = (e: ForgeEvent): void => {
   clarify.handle(e);
   blueprintCard.handle(e);
   changeCard.handle(e);
+  historyPanel.handle(e);
   offeringCards.handle(e);
   alerts.handle(e);
   hud.gauge(e);
