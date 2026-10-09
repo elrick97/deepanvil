@@ -161,6 +161,7 @@ event contract.
 - ✓ Project picker (the project chip in the HUD): add a repository by its WSL path (validated) or clone an https:// URL, switch between projects while idle, forget one. Each project keeps its own history, vault, Odin and merge rules; Odin keeps whichever branch the repo has checked out (not just `main`), and only the sandbox defaults to auto-merge.
 - Dirty-repo handling, settings panel.
 - ✓ Project instructions: Thráin (plan, replan, triage, rescope), the smiths and Odin's review follow the repo's CLAUDE.md / AGENTS.md, read as plain data from the committed snapshot (with in-repo `@imports`; never through the engine's project settings, which would also load a repo's hooks), and the picker shows which files are in force. Skills (`.claude/skills`) and per-repo custom gates are still open.
+- ✓ Trust: a project you have just added runs none of its own scripts (Odin's health check included) until you approve a quest in it; the practice sandbox is trusted from the start.
 - O4 PR mode; quest report; whole-quest diff with inline comments as send-back notes.
 - Quest board backlog; "always allow" permission rules; opt-in MCP per repo.
 - Cost estimate on blueprints; error cards.

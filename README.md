@@ -216,8 +216,14 @@ it at anything you care about.
   (writes outside the worktree fail with "Read-only file system"; it warns at startup if missing).
   Also: work on repos you trust, review the blueprint before approving, and let Odin's gates and
   review guard `main`.
+- **New projects run nothing until you approve a quest.** Odin's gates run a project's own
+  scripts (`npm test`, typecheck, lint), so a repository you have just added or cloned is not
+  touched: no health check, no scripts, no folders created. Its first run is the first quest you
+  approve in it. Clones accept plain `https://` URLs only.
 - **Agents are isolated** from your account's MCP connectors (mail, calendar, …) and from user
-  and project Claude settings.
+  and project Claude settings. A repository's own `CLAUDE.md` / `AGENTS.md` are read as plain
+  text from the committed snapshot and shown to the agents as lower-authority guidance; the
+  repo's hooks, MCP servers and permission rules are never loaded.
 - **Secrets stay out of the repo.** Push (VAPID) keys, the database and the engine live in
   `~/.deepanvil`; the agents use your existing Claude login. Nothing in this repository is
   machine- or account-specific.
